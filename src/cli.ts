@@ -8,7 +8,7 @@ type ExamConfig = {
   examName: string;
   label?: string;
   seedUrls: string[];
-  years?: string[];  // Made optional since we don't need filtering
+  years?: string[];  // Array of years for filtering
   usePuppeteer?: boolean;
 };
 
@@ -41,37 +41,67 @@ function parseArgFlag(flag: string) {
 }
 
 /**
- * Enhanced PDF discovery with multiple strategies
+ * Simple year-based filter that only checks for years in URLs
+ */
+function filterPdfsByYears(pdfs: string[], targetYears: string[]): string[] {
+  console.log(`\nFiltering ${pdfs.length} PDFs for years: ${targetYears.join(', ')}`);
+  
+  // Build year regex from target years
+  const yearPattern = new RegExp(`\\b(${targetYears.join('|')})\\b`, 'i');
+  
+  const filtered = pdfs.filter(url => {
+    // Must be a PDF
+    if (!/\.pdf($|\?)/i.test(url)) return false;
+    
+    // Must contain target year
+    const hasTargetYear = yearPattern.test(url);
+    
+    return hasTargetYear;
+  });
+  
+  console.log(`Filtered down to ${filtered.length} PDFs matching the specified years`);
+  return filtered;
+}
+
+/**
+ * Enhanced PDF discovery with year-based filtering
  */
 async function discoverPdfs(
   seedUrl: string, 
   examName: string,
   outDir: string,
+  years?: string[],
   mode: 'normal' | 'maximum' | 'filtered' = 'maximum'
-): Promise<string[]> {
+): Promise<{ allPdfs: string[], filteredPdfs: string[] }> {
   console.log(`\n  -> Discovering PDFs from: ${seedUrl}`);
   console.log(`     Mode: ${mode}`);
   
-  let pdfs: string[] = [];
+  let allPdfs: string[] = [];
   
   switch (mode) {
     case 'maximum':
-      pdfs = await expandOneLevelMaximum(seedUrl);
+      allPdfs = await expandOneLevelMaximum(seedUrl);
       break;
     case 'normal':
-      pdfs = await expandOneLevelUnfiltered(seedUrl);
+      allPdfs = await expandOneLevelUnfiltered(seedUrl);
       break;
     case 'filtered':
       // Use filtered search if years are specified
-      pdfs = await expandOneLevel(seedUrl, examName, ['2020', '2021', '2022', '2023', '2024', '2025']);
+      allPdfs = await expandOneLevel(seedUrl, examName, years || ['2020', '2021', '2022', '2023', '2024', '2025']);
       break;
     default:
-      pdfs = await expandOneLevelUnfiltered(seedUrl);
+      allPdfs = await expandOneLevelUnfiltered(seedUrl);
   }
   
-  console.log(`     Total PDFs discovered: ${pdfs.length}`);
+  console.log(`     Total PDFs discovered: ${allPdfs.length}`);
 
-  if (pdfs.length === 0) {
+  // Apply year-based filtering if years are specified
+  let filteredPdfs: string[] = [];
+  if (years && years.length > 0) {
+    filteredPdfs = filterPdfsByYears(allPdfs, years);
+  }
+
+  if (allPdfs.length === 0) {
     console.log(`     ⚠️  No PDFs found. This could mean:`);
     console.log(`        - The site structure is complex/unusual`);
     console.log(`        - PDFs are behind forms/authentication`);
@@ -84,27 +114,57 @@ async function discoverPdfs(
   const dir = `${outDir}/${examName}`;
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   
-  // Save manifest with metadata
-  const manifest = {
+  // Save main manifest with all PDFs
+  const mainManifest = {
     seedUrl,
     examName,
     crawlMode: mode,
     crawlTimestamp: new Date().toISOString(),
-    totalPdfs: pdfs.length,
-    pdfs: pdfs.map((url, index) => ({
+    totalPdfs: allPdfs.length,
+    pdfs: allPdfs.map((url, index) => ({
       id: index + 1,
       url,
       filename: getFilenameFromUrl(url),
-      estimatedRelevance: calculateRelevanceScore(url, examName)
-    })).sort((a, b) => b.estimatedRelevance - a.estimatedRelevance) // Sort by relevance
+      yearFound: extractYearFromUrl(url)
+    }))
   };
 
-  const manifestPath = `${dir}/${host}-manifest.json`;
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf-8');
-  console.log(`     Saved manifest: ${manifestPath}`);
+  const mainManifestPath = `${dir}/${host}-manifest.json`;
+  writeFileSync(mainManifestPath, JSON.stringify(mainManifest, null, 2), 'utf-8');
+  console.log(`     Saved main manifest: ${mainManifestPath}`);
 
-  // Return sorted PDFs (most relevant first)
-  return manifest.pdfs.map(p => p.url);
+  // Save filtered manifest if years are specified
+  if (years && years.length > 0 && filteredPdfs.length > 0) {
+    const filteredManifest = {
+      seedUrl,
+      examName,
+      crawlMode: mode,
+      crawlTimestamp: new Date().toISOString(),
+      filterYears: years,
+      totalFilteredPdfs: filteredPdfs.length,
+      totalAllPdfs: allPdfs.length,
+      pdfs: filteredPdfs.map((url, index) => ({
+        id: index + 1,
+        url,
+        filename: getFilenameFromUrl(url),
+        yearFound: extractYearFromUrl(url)
+      }))
+    };
+
+    const filteredManifestPath = `${dir}/${host}-manifest-filtered-${years.join('-')}.json`;
+    writeFileSync(filteredManifestPath, JSON.stringify(filteredManifest, null, 2), 'utf-8');
+    console.log(`     Saved filtered manifest: ${filteredManifestPath}`);
+  }
+
+  return { allPdfs, filteredPdfs };
+}
+
+/**
+ * Extract year from URL
+ */
+function extractYearFromUrl(url: string): string | null {
+  const yearMatch = url.match(/\b(20\d{2})\b/);
+  return yearMatch ? yearMatch[1] : null;
 }
 
 /**
@@ -121,67 +181,28 @@ function getFilenameFromUrl(url: string): string {
 }
 
 /**
- * Calculate relevance score for a PDF URL
+ * Download PDFs with progress tracking
  */
-function calculateRelevanceScore(url: string, examName: string): number {
-  let score = 0;
-  const urlLower = url.toLowerCase();
-  const examLower = examName.toLowerCase();
-  
-  // Exam name relevance
-  if (urlLower.includes(examLower)) score += 50;
-  examLower.split(/[-_\s]+/).forEach(part => {
-    if (part.length > 2 && urlLower.includes(part)) score += 20;
-  });
-  
-  // Question paper indicators
-  if (/\b(question|paper|previous|past|model|sample)\b/.test(urlLower)) score += 30;
-  if (/\b(tier|phase|shift|set)\b/.test(urlLower)) score += 20;
-  if (/\b(english|hindi|mathematics|reasoning|gk|general)\b/.test(urlLower)) score += 15;
-  
-  // Recent years get higher scores
-  const currentYear = new Date().getFullYear();
-  for (let year = currentYear; year >= currentYear - 10; year--) {
-    if (urlLower.includes(year.toString())) {
-      score += Math.max(5, 50 - (currentYear - year) * 5);
-      break;
-    }
-  }
-  
-  // Penalty for very deep paths or complex URLs
-  const pathDepth = (url.match(/\//g) || []).length;
-  if (pathDepth > 8) score -= 10;
-  
-  // Bonus for PDF in filename
-  if (/\.pdf$/i.test(url)) score += 10;
-  
-  return Math.max(0, score);
-}
-
-/**
- * Smart download with progress tracking
- */
-async function downloadPdfsWithLimit(
+async function downloadPdfs(
   pdfs: string[], 
-  maxDownloads: number, 
   outDir: string,
-  examName: string
+  examName: string,
+  filterType: 'all' | 'filtered' = 'filtered'
 ): Promise<void> {
   if (pdfs.length === 0) {
     console.log(`No PDFs to download`);
     return;
   }
 
-  const downloadLimit = Math.min(maxDownloads, pdfs.length);
-  console.log(`\nStarting smart download of top ${downloadLimit} PDFs (out of ${pdfs.length} available)...`);
+  console.log(`\nStarting download of ${pdfs.length} ${filterType} PDFs...`);
   
   let successful = 0;
   let failed = 0;
   const results: Array<{ url: string; status: 'success' | 'failed'; fileName?: string; error?: string }> = [];
 
-  for (let i = 0; i < downloadLimit; i++) {
+  for (let i = 0; i < pdfs.length; i++) {
     const pdfUrl = pdfs[i];
-    const progress = `[${i + 1}/${downloadLimit}]`;
+    const progress = `[${i + 1}/${pdfs.length}]`;
     
     try {
       console.log(`${progress} Downloading: ${getFilenameFromUrl(pdfUrl)}`);
@@ -206,13 +227,13 @@ async function downloadPdfsWithLimit(
     }
     
     // Respectful delay between downloads
-    if (i < downloadLimit - 1) {
+    if (i < pdfs.length - 1) {
       await new Promise(resolve => setTimeout(resolve, 800));
     }
     
     // Progress update every 5 downloads
     if ((i + 1) % 5 === 0) {
-      console.log(`    Progress: ${i + 1}/${downloadLimit} completed (${successful} successful, ${failed} failed)`);
+      console.log(`    Progress: ${i + 1}/${pdfs.length} completed (${successful} successful, ${failed} failed)`);
     }
   }
 
@@ -220,18 +241,19 @@ async function downloadPdfsWithLimit(
   const downloadReport = {
     examName,
     downloadTimestamp: new Date().toISOString(),
-    totalAttempted: downloadLimit,
+    downloadType: filterType,
+    totalAttempted: pdfs.length,
     successful,
     failed,
-    successRate: `${((successful / downloadLimit) * 100).toFixed(1)}%`,
+    successRate: `${((successful / pdfs.length) * 100).toFixed(1)}%`,
     results
   };
 
-  const reportPath = `${outDir}/${examName}/download-report.json`;
+  const reportPath = `${outDir}/${examName}/download-report-${filterType}.json`;
   writeFileSync(reportPath, JSON.stringify(downloadReport, null, 2), 'utf-8');
   
   console.log(`\n📊 Download Summary:`);
-  console.log(`    Total attempted: ${downloadLimit}`);
+  console.log(`    Total attempted: ${pdfs.length}`);
   console.log(`    Successful: ${successful}`);
   console.log(`    Failed: ${failed}`);
   console.log(`    Success rate: ${downloadReport.successRate}`);
@@ -242,7 +264,7 @@ async function downloadPdfsWithLimit(
     console.log(`    - Some PDFs might be behind authentication`);
     console.log(`    - Server might be rate-limiting requests`);
     console.log(`    - Files might have been moved or deleted`);
-    console.log(`    - Try reducing --max-downloads for better success rate`);
+    console.log(`    - Try running again later`);
   }
 }
 
@@ -250,10 +272,10 @@ async function main() {
   const cfg = loadConfig();
   const cliExam = parseCliExam();
   const doDownload = argv.includes('--download');
-  const maxDownloads = Number(parseArgFlag('--max-downloads') ?? cfg.global?.defaultMaxDownloadsPerExam ?? 20);
   const outDir = cfg.global?.outDir ?? 'data';
   const crawlMode = parseArgFlag('--mode') as 'normal' | 'maximum' | 'filtered' || 'maximum';
   const dryRun = argv.includes('--dry-run');
+  const downloadAll = argv.includes('--download-all'); // New flag to download all PDFs instead of filtered
   
   // Filter exams to run
   const examsToRun = cfg.exams.filter((e) => !cliExam || e.examName === cliExam);
@@ -265,17 +287,21 @@ async function main() {
 
   console.log(`\n=== Enhanced PDF Scraper Started ===`);
   console.log(`Crawl mode: ${crawlMode.toUpperCase()}`);
-  console.log(`Max downloads per exam: ${maxDownloads}`);
   console.log(`Output directory: ${outDir}`);
   console.log(`Running exams: ${examsToRun.map(e => e.examName).join(', ')}`);
   console.log(`Dry run: ${dryRun ? 'YES (no downloads)' : 'NO'}`);
+  console.log(`Download mode: ${downloadAll ? 'ALL PDFs' : 'FILTERED by years only'}`);
 
   for (const exam of examsToRun) {
     console.log(`\n${'='.repeat(60)}`);
     console.log(`🎯 Exam: ${exam.examName} (${exam.label ?? 'no-label'})`);
+    if (exam.years && exam.years.length > 0) {
+      console.log(`📅 Target years: ${exam.years.join(', ')}`);
+    }
     console.log(`${'='.repeat(60)}`);
 
     let allDiscoveredPdfs: string[] = [];
+    let allFilteredPdfs: string[] = [];
 
     // Process each seed URL
     for (let i = 0; i < exam.seedUrls.length; i++) {
@@ -283,10 +309,11 @@ async function main() {
       console.log(`\n📍 Processing seed ${i + 1}/${exam.seedUrls.length}: ${seed}`);
       
       try {
-        const pdfs = await discoverPdfs(seed, exam.examName, outDir, crawlMode);
-        allDiscoveredPdfs.push(...pdfs);
+        const { allPdfs, filteredPdfs } = await discoverPdfs(seed, exam.examName, outDir, exam.years, crawlMode);
+        allDiscoveredPdfs.push(...allPdfs);
+        allFilteredPdfs.push(...filteredPdfs);
         
-        if (pdfs.length === 0) {
+        if (allPdfs.length === 0) {
           console.log(`⚠️  No PDFs found from this seed. Trying next seed...`);
         }
       } catch (error) {
@@ -295,33 +322,52 @@ async function main() {
       }
     }
 
-    // Remove duplicates and sort by relevance
-    const uniquePdfs = Array.from(new Set(allDiscoveredPdfs));
-    const sortedPdfs = uniquePdfs
-      .map(url => ({ url, score: calculateRelevanceScore(url, exam.examName) }))
-      .sort((a, b) => b.score - a.score)
-      .map(item => item.url);
+    // Remove duplicates
+    const uniqueAllPdfs = Array.from(new Set(allDiscoveredPdfs));
+    const uniqueFilteredPdfs = Array.from(new Set(allFilteredPdfs));
 
     console.log(`\n📋 Discovery Summary for ${exam.examName}:`);
-    console.log(`    Total unique PDFs found: ${uniquePdfs.length}`);
+    console.log(`    Total unique PDFs found: ${uniqueAllPdfs.length}`);
+    if (exam.years && exam.years.length > 0) {
+      console.log(`    Filtered PDFs (years: ${exam.years.join(', ')}): ${uniqueFilteredPdfs.length}`);
+    }
     console.log(`    From ${exam.seedUrls.length} seed URL(s)`);
     
-    if (sortedPdfs.length > 0) {
-      console.log(`\n🏆 Top ${Math.min(10, sortedPdfs.length)} most relevant PDFs:`);
-      sortedPdfs.slice(0, 10).forEach((url, idx) => {
-        const score = calculateRelevanceScore(url, exam.examName);
+    if (uniqueFilteredPdfs.length > 0) {
+      console.log(`\n📄 Year-filtered PDFs found:`);
+      uniqueFilteredPdfs.slice(0, 10).forEach((url, idx) => {
+        const year = extractYearFromUrl(url);
         const fileName = getFilenameFromUrl(url);
-        console.log(`    ${idx + 1}. ${fileName} (score: ${score})`);
+        console.log(`    ${idx + 1}. ${fileName} ${year ? `(${year})` : ''}`);
         if (idx < 3) console.log(`       ${url}`);
       });
+      if (uniqueFilteredPdfs.length > 10) {
+        console.log(`    ... and ${uniqueFilteredPdfs.length - 10} more`);
+      }
     }
 
     // Download phase
-    if (!dryRun && doDownload && sortedPdfs.length > 0) {
-      await downloadPdfsWithLimit(sortedPdfs, maxDownloads, outDir, exam.examName);
+    if (!dryRun && doDownload) {
+      if (downloadAll) {
+        // Download all discovered PDFs
+        if (uniqueAllPdfs.length > 0) {
+          await downloadPdfs(uniqueAllPdfs, outDir, exam.examName, 'all');
+        }
+      } else {
+        // Download only filtered PDFs (default behavior)
+        if (exam.years && exam.years.length > 0 && uniqueFilteredPdfs.length > 0) {
+          await downloadPdfs(uniqueFilteredPdfs, outDir, exam.examName, 'filtered');
+        } else if (!exam.years || exam.years.length === 0) {
+          console.log(`\n⚠️  No years specified in config for ${exam.examName}. Skipping download.`);
+          console.log(`   Add "years": ["2023", "2024"] to config or use --download-all flag.`);
+        } else {
+          console.log(`\n⚠️  No PDFs found matching the specified years for ${exam.examName}.`);
+        }
+      }
     } else if (dryRun) {
       console.log(`\n🔍 Dry run complete - no downloads performed`);
-      console.log(`   Use --download flag to actually download files`);
+      console.log(`   Use --download flag to download filtered PDFs`);
+      console.log(`   Use --download --download-all flag to download all PDFs`);
     } else if (!doDownload) {
       console.log(`\n💾 Discovery complete - use --download flag to download files`);
     }
@@ -336,29 +382,29 @@ async function main() {
   console.log('\n📚 Usage Examples:');
   console.log('  # Discover PDFs (no download):');
   console.log('  npm run dev');
-  console.log('  npm run dev -- --exam SSC-CGL');
+  console.log('  npm run dev -- --exam SSC-CHSL');
   console.log('');
-  console.log('  # Discover and download (default 20 PDFs):');
+  console.log('  # Discover and download filtered PDFs (by years in config):');
   console.log('  npm run dev -- --download');
-  console.log('  npm run dev -- --exam SSC-CGL --download');
+  console.log('  npm run dev -- --exam SSC-CHSL --download');
   console.log('');
-  console.log('  # Custom download limits:');
-  console.log('  npm run dev -- --download --max-downloads 10');
-  console.log('  npm run dev -- --download --max-downloads 50');
+  console.log('  # Download ALL discovered PDFs (ignore year filter):');
+  console.log('  npm run dev -- --download --download-all');
   console.log('');
   console.log('  # Different crawl modes:');
   console.log('  npm run dev -- --mode maximum --download    # Most aggressive (default)');
   console.log('  npm run dev -- --mode normal --download     # Standard crawling');
-  console.log('  npm run dev -- --mode filtered --download   # Filter by years');
+  console.log('  npm run dev -- --mode filtered --download   # Filter by years during crawl');
   console.log('');
   console.log('  # Dry run (discover only, no downloads):');
   console.log('  npm run dev -- --dry-run');
   console.log('');
   console.log('💡 Tips:');
+  console.log('  - Add "years": ["2023", "2024", "2025"] in your config.json');
   console.log('  - Start with --dry-run to see what will be downloaded');
-  console.log('  - Use --max-downloads 10 for testing');
-  console.log('  - Check the manifest.json files for all discovered PDFs');
-  console.log('  - Use maximum mode for best coverage');
+  console.log('  - Use --download-all to ignore year filtering');
+  console.log('  - Check the manifest files for all discovered PDFs');
+  console.log('  - Filtered manifest will be created when years are specified');
 }
 
 main().catch((err) => {

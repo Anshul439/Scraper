@@ -5,7 +5,8 @@
       "label": "New site for ssc chsl",
       "seedUrls": [
         "https://www.careerpower.in/ssc-chsl-previous-year-question-paper.html"
-      ]
+      ],
+      "years": ["2016"]
     }
   ],
   "global": {
