@@ -3,10 +3,11 @@
     {
       "examName": "SSC-CHSL",
       "label": "New site for ssc chsl",
+      "examKey": "chsl",
       "seedUrls": [
         "https://www.careerpower.in/ssc-chsl-previous-year-question-paper.html"
       ],
-      "years": ["2016"]
+      "years": ["2023"]
     }
   ],
   "global": {

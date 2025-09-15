@@ -1,22 +1,31 @@
-// src/scraper/httpCrawler.ts
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
 const PDF_EXT_REGEX = /\.pdf($|\?)/i;
 
 /**
- * Dynamic filter function that works with any exam name and years
+ * Enhanced filter function that works with exam name, years, and examKey
  */
 export function filterPdfsForExam(
   pdfUrls: string[], 
   examName: string, 
-  targetYears: string[]
+  targetYears: string[],
+  examKey?: string  // NEW: optional examKey filter
 ): string[] {
   console.log(`\nFiltering ${pdfUrls.length} PDFs for exam: ${examName}, years: ${targetYears.join(', ')}`);
+  if (examKey) {
+    console.log(`ExamKey filter: "${examKey}"`);
+  }
   
   // Build dynamic exam name patterns
   const examPatterns = buildDynamicExamPatterns(examName);
   console.log(`Built ${examPatterns.length} exam patterns from "${examName}"`);
+  
+  // Build examKey patterns if provided
+  const examKeyPatterns = examKey ? buildExamKeyPatterns(examKey) : [];
+  if (examKeyPatterns.length > 0) {
+    console.log(`Built ${examKeyPatterns.length} examKey patterns from "${examKey}"`);
+  }
   
   // Build year regex from target years
   const yearPattern = new RegExp(`\\b(${targetYears.join('|')})\\b`, 'i');
@@ -27,29 +36,80 @@ export function filterPdfsForExam(
     // Must be a PDF
     if (!PDF_EXT_REGEX.test(url)) return false;
     
-    // Must contain exam name (any pattern)
-    const hasExamName = examPatterns.some(pattern => pattern.test(urlLower));
+    // Must contain exam name (any pattern) OR examKey (if specified)
+    let hasExamMatch = false;
+    if (examKeyPatterns.length > 0) {
+      // If examKey is specified, prioritize it over examName patterns
+      hasExamMatch = examKeyPatterns.some(pattern => pattern.test(urlLower));
+      // Fallback to exam name patterns if examKey doesn't match
+      if (!hasExamMatch) {
+        hasExamMatch = examPatterns.some(pattern => pattern.test(urlLower));
+      }
+    } else {
+      // Use exam name patterns only
+      hasExamMatch = examPatterns.some(pattern => pattern.test(urlLower));
+    }
     
     // Must contain target year
     const hasTargetYear = yearPattern.test(url);
     
     // Must have question paper indicators
-    const hasQuestionPaperKeywords = /\b(question|paper|previous|past|model|sample|set|tier|phase|shift|slot|exam|english)\b/i.test(urlLower);
+    const hasQuestionPaperKeywords = /\b(question|paper|previous|past|model|sample|set|tier|phase|shift|slot|exam|english|hindi|mathematics|reasoning|general|knowledge|gk|quantitative|aptitude|computer|awareness)\b/i.test(urlLower);
     
     // Debug logging for first few URLs
     if (pdfUrls.indexOf(url) < 5) {
       console.log(`URL: ${url}`);
-      console.log(`  Exam match: ${hasExamName}`);
+      console.log(`  Exam match: ${hasExamMatch}`);
+      if (examKeyPatterns.length > 0) {
+        const examKeyMatch = examKeyPatterns.some(pattern => pattern.test(urlLower));
+        console.log(`  ExamKey match: ${examKeyMatch}`);
+      }
       console.log(`  Year match: ${hasTargetYear}`);
       console.log(`  Paper keywords: ${hasQuestionPaperKeywords}`);
-      console.log(`  Final result: ${hasExamName && hasTargetYear && hasQuestionPaperKeywords}`);
+      console.log(`  Final result: ${hasExamMatch && hasTargetYear && hasQuestionPaperKeywords}`);
     }
     
-    return hasExamName && hasTargetYear && hasQuestionPaperKeywords;
+    return hasExamMatch && hasTargetYear && hasQuestionPaperKeywords;
   });
   
   console.log(`Filtered down to ${filtered.length} relevant PDFs`);
   return filtered;
+}
+
+/**
+ * Build examKey-specific regex patterns
+ */
+function buildExamKeyPatterns(examKey: string): RegExp[] {
+  const patterns: RegExp[] = [];
+  const cleanKey = examKey.toLowerCase().trim();
+  
+  if (!cleanKey) return patterns;
+  
+  // Pattern 1: Exact match with word boundaries
+  patterns.push(new RegExp(`\\b${escapeRegex(cleanKey)}\\b`, 'i'));
+  
+  // Pattern 2: Handle different separators and formats
+  if (cleanKey.length >= 2) {
+    // Allow for common separations like "ssc-chsl", "ssc_chsl", "sscchsl"
+    const flexibleKey = cleanKey.split('').join('[-_\\s]*');
+    patterns.push(new RegExp(`\\b${flexibleKey}\\b`, 'i'));
+    
+    // Pattern 3: With common prefixes (ssc-chsl, ibps-po, etc.)
+    const commonPrefixes = ['ssc', 'ibps', 'upsc', 'rrb', 'bank', 'railway'];
+    commonPrefixes.forEach(prefix => {
+      if (!cleanKey.startsWith(prefix)) {
+        patterns.push(new RegExp(`\\b${prefix}[-_\\s]*${escapeRegex(cleanKey)}\\b`, 'i'));
+      }
+    });
+    
+    // Pattern 4: As part of longer exam names
+    patterns.push(new RegExp(`${escapeRegex(cleanKey)}`, 'i'));
+  }
+  
+  // Debug: log patterns
+  console.log(`ExamKey patterns for "${examKey}":`, patterns.map(p => p.source));
+  
+  return patterns;
 }
 
 /**
@@ -98,7 +158,7 @@ function buildDynamicExamPatterns(examName: string): RegExp[] {
  * Escape special regex characters
  */
 function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\  // Pattern 2: Handle different separators (dash, underscore, space');
 }
 
 /**
@@ -184,9 +244,9 @@ function parsePageForLinks(html: string, baseUrl: string, strategy: 'conservativ
     
     if (strategy === 'maximum') {
       // Follow almost everything except obvious exclusions
-      const hasGoodIndicators = /\b(pdf|download|exam|question|paper|result|notification|archive|previous|year|2020|2021|2022|2023|2024|2025|english|hindi|tier|phase|shift|recruitment|selection|vacancy|post|job|ssc|commission|government|govt|public|service|general|awareness|reasoning|quantitative|mathematics|computer|current|affairs|gk)\b/i.test(`${abs} ${combinedText}`);
+      const hasGoodIndicators = /\b(pdf|download|exam|question|paper|result|notification|archive|previous|year|2020|2021|2022|2023|2024|2025|english|hindi|tier|phase|shift|recruitment|selection|vacancy|post|job|ssc|commission|government|govt|public|service|general|awareness|reasoning|quantitative|mathematics|computer|current|affairs|gk|chsl|cgl|po|clerk|officer|assistant|banking|railway|defence|teaching|upsc|ibps|rrb)\b/i.test(`${abs} ${combinedText}`);
       
-      const hasBadIndicators = /\b(advertisement|ads|banner|popup|modal|overlay|social|media|share|like|follow|subscribe|newsletter|email|phone|mobile|contact|address|location|map|direction|office|branch|regional|zonal|about|history|vision|mission|chairman|director|secretary|minister|organogram|structure|hierarchy|budget|tender|auction|purchase|procurement|vendor|supplier|contractor|maintenance|repair|construction|infrastructure|building|facility|campus|library|canteen|hostel|guest|house|vehicle|transport|parking|security|safety|fire|emergency|medical|health|insurance|pension|provident|fund|loan|advance|welfare|union|association|club|society|cultural|sports|recreation|entertainment|festival|celebration|ceremony|inauguration|foundation|anniversary|award|recognition|appreciation|felicitation|condolence|obituary|retirement|transfer|posting|promotion|deputation|training|workshop|seminar|conference|meeting|discussion|deliberation|consultation|suggestion|feedback|opinion|poll|survey|questionnaire|complaint|grievance|appeal|representation|petition|application|request|requisition|proposal|recommendation|approval|sanction|permission|clearance|certificate|license|registration|enrollment|admission|affiliation|recognition|accreditation|validation|verification|authentication|authorization|delegation|nomination|appointment|selection|recruitment|hiring|employment|job|career|opportunity|opening|vacancy|post|position|designation|cadre|service|department|ministry|division|section|unit|cell|wing|branch|office|headquarters|regional|zonal|state|district|block|tehsil|panchayat|municipal|corporation|council|board|committee|commission|authority|agency|organization|institution|establishment|enterprise|company|firm|business|industry|sector|field|domain|area|zone|region|territory|jurisdiction|boundary|limit|scope|coverage|extent|range|span|duration|period|phase|stage|step|level|grade|class|category|group|type|kind|sort|variety|version|edition|issue|volume|number|series|sequence|order|rank|position|status|condition|state|situation|circumstance|context|background|history|origin|source|cause|reason|purpose|objective|goal|target|aim|intention|plan|strategy|policy|rule|regulation|guideline|instruction|direction|procedure|process|method|technique|approach|way|means|mode|manner|style|format|structure|layout|design|pattern|template|model|sample|example|instance|case|scenario|situation|problem|issue|challenge|difficulty|obstacle|barrier|constraint|limitation|restriction|prohibition|ban|embargo|sanction|penalty|punishment|fine|fee|charge|cost|price|rate|amount|sum|total|grand|overall|aggregate|collective|combined|joint|common|shared|mutual|reciprocal|bilateral|multilateral|international|national|regional|local|domestic|foreign|external|internal|private|public|personal|individual|group|team|committee|panel|jury|board|council|assembly|parliament|legislature|congress|senate|house|chamber|hall|room|space|place|location|site|venue|facility|building|structure|complex|campus|compound|premises|property|estate|land|area|zone|region|territory|district|state|country|nation|continent|world|global|universal|general|specific|particular|special|unique|distinct|different|separate|individual|personal|private|confidential|classified|restricted|limited|exclusive|premium|deluxe|luxury|standard|normal|regular|ordinary|common|usual|typical|conventional|traditional|classical|modern|contemporary|current|recent|latest|new|fresh|novel|innovative|creative|original|authentic|genuine|real|actual|true|correct|right|proper|appropriate|suitable|relevant|applicable|pertinent|related|connected|linked|associated|affiliated|attached|bound|tied|joined|united|combined|merged|integrated|consolidated|unified|coordinated|synchronized|aligned|matched|paired|coupled|linked|connected|related|associated|correlated|corresponding|equivalent|equal|same|similar|alike|comparable|analogous|parallel|concurrent|simultaneous|synchronous|contemporaneous|coeval|coexistent|coextensive|concomitant|accompanying|attendant|ancillary|subsidiary|supplementary|complementary|additional|extra|bonus|premium|special|exclusive|unique|rare|scarce|limited|restricted|controlled|regulated|supervised|monitored|observed|watched|tracked|followed|pursued|chased|hunted|searched|sought|looked|found|discovered|detected|identified|recognized|acknowledged|accepted|approved|endorsed|supported|backed|sponsored|funded|financed|invested|donated|contributed|subscribed|pledged|committed|dedicated|devoted|loyal|faithful|true|honest|sincere|genuine|authentic|real|actual|factual|accurate|correct|right|proper|appropriate|suitable|fit|qualified|eligible|entitled|authorized|permitted|allowed|approved|sanctioned|endorsed|supported|backed|sponsored|recommended|suggested|proposed|offered|provided|supplied|delivered|distributed|circulated|published|announced|declared|proclaimed|stated|mentioned|noted|observed|remarked|commented|said|told|informed|notified|advised|warned|cautioned|alerted|reminded|urged|requested|asked|invited|welcomed|greeted|received|accepted|acknowledged|appreciated|thanked|congratulated|praised|commended|applauded|celebrated|honored|recognized|awarded|rewarded|compensated|paid|remunerated|reimbursed|refunded|returned|restored|recovered|retrieved|reclaimed|regained|resumed|continued|proceeded|advanced|progressed|developed|grew|expanded|extended|enlarged|increased|multiplied|doubled|tripled|quadrupled|magnified|amplified|enhanced|improved|upgraded|updated|revised|modified|changed|altered|adjusted|adapted|customized|personalized|individualized|tailored|fitted|matched|suited|aligned|coordinated|synchronized|harmonized|balanced|stabilized|regulated|controlled|managed|administered|supervised|overseen|monitored|observed|watched|tracked|followed|guided|directed|led|headed|commanded|ordered|instructed|taught|trained|educated|informed|enlightened|illuminated|clarified|explained|described|detailed|outlined|summarized|condensed|compressed|reduced|minimized|simplified|streamlined|optimized|maximized|enhanced|improved|refined|polished|perfected|completed|finished|concluded|ended|terminated|stopped|ceased|discontinued|abandoned|dropped|cancelled|postponed|delayed|deferred|suspended|paused|halted|interrupted|disrupted|disturbed|interfered|obstructed|blocked|prevented|avoided|evaded|escaped|fled|ran|rushed|hurried|quickened|accelerated|speeded|hastened|expedited|facilitated|eased|simplified|clarified|explained|demonstrated|showed|displayed|exhibited|presented|introduced|launched|initiated|started|began|commenced|opened|established|founded|created|formed|built|constructed|developed|designed|planned|organized|arranged|prepared|ready|set|equipped|armed|loaded|charged|powered|energized|activated|enabled|turned|switched|operated|worked|functioned|performed|executed|implemented|applied|used|utilized|employed|deployed|installed|mounted|fixed|attached|connected|linked|joined|united|combined|merged|integrated|consolidated|unified|coordinated|synchronized|aligned|matched|paired|coupled)\b/i.test(combinedText);
+      const hasBadIndicators = /\b(advertisement|ads|banner|popup|modal|overlay|social|media|share|like|follow|subscribe|newsletter|email|phone|mobile|contact|address|location|map|direction|office|about|history|vision|mission|privacy|terms|disclaimer|copyright|feedback|complaint|grievance)\b/i.test(combinedText);
       
       shouldFollow = hasGoodIndicators && !hasBadIndicators;
     } else {
@@ -321,6 +381,7 @@ function getPriorityScore(url: string): number {
   if (/\b(20(1[5-9]|2[0-5]))\b/.test(urlLower)) score += 8; // Recent years
   if (/\b(tier|phase|shift|english|hindi|mathematics|reasoning|gk)\b/.test(urlLower)) score += 6;
   if (/\b(recruitment|selection|notification|result)\b/.test(urlLower)) score += 4;
+  if (/\b(chsl|cgl|po|clerk|officer|assistant|ssc|ibps|rrb)\b/.test(urlLower)) score += 5; // Common exam keywords
   
   // Penalty for deep paths
   const pathDepth = (url.match(/\//g) || []).length;
@@ -330,14 +391,19 @@ function getPriorityScore(url: string): number {
 }
 
 /**
- * Main function: crawl and filter PDFs based on exam name and years
+ * Enhanced main function: crawl and filter PDFs based on exam name, years, and examKey
  */
 export async function expandOneLevel(
   seedUrl: string, 
   examName: string, 
-  targetYears: string[]
+  targetYears: string[],
+  examKey?: string  // NEW: optional examKey parameter
 ): Promise<string[]> {
-  console.log(`\n=== Enhanced crawling for ${examName} (${targetYears.join(', ')}) ===`);
+  console.log(`\n=== Enhanced crawling for ${examName} ===`);
+  console.log(`Target years: ${targetYears.join(', ')}`);
+  if (examKey) {
+    console.log(`ExamKey filter: "${examKey}"`);
+  }
   
   const rawPdfs = await discoverAllPdfsRecursive(seedUrl, { 
     maxDepth: 6, 
@@ -348,7 +414,7 @@ export async function expandOneLevel(
     maxPdfsToFind: 500
   });
   
-  const filtered = filterPdfsForExam(rawPdfs, examName, targetYears);
+  const filtered = filterPdfsForExam(rawPdfs, examName, targetYears, examKey);
   return filtered;
 }
 

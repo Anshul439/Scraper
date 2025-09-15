@@ -1,4 +1,3 @@
-// src/downloader/index.ts
 import axios from 'axios';
 import { createWriteStream, mkdirSync, existsSync } from 'fs';
 import { basename } from 'path';
