@@ -9,14 +9,14 @@ import {
   runQuestionExtractionPipeline,
   createPipelineConfig,
   runPipelineForExam,
-} from "./pipelineOrchestrator";
+} from "../claudePipeline/pipelineOrchestrator";
 import {
   exportPipelineToSheets,
   exportMultipleExamsToSheets,
   createPipelineToSheetsConfig,
   validateSheetsConfig,
   getGoogleSheetsSetupInstructions,
-} from "./sheetsIntegration";
+} from "../exporter/sheetsIntegration";
 
 interface CliArgs {
   inputDir?: string;
@@ -282,7 +282,7 @@ Configuration:
   Output Directory: ${args.outputDir}
   Exam Name: ${args.examName || "Auto-detected"}
   Batch Size: ${args.batchSize || 5}
-  Max Questions/PDF: ${args.maxQuestions || 100}
+  Max Questions/PDF: ${args.maxQuestions || 1000}
   Claude API Key: ${apiKey.substring(0, 10)}...
   
 Google Sheets Export: ${args.exportSheets ? "Enabled" : "Disabled"}

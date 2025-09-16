@@ -4,8 +4,8 @@
   "description": "Dynamic pipeline to create high quality dataset of government exam papers",
   "main": "index.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/cli.ts",
-    "pipeline": "ts-node-dev --respawn --transpile-only src/pipeline-cli.ts",
+    "dev": "ts-node-dev --respawn --transpile-only src/cli/scraperCli.ts",
+    "pipeline": "ts-node-dev --respawn --transpile-only src/cli/pipelineCli.ts",
     "build": "tsc",
     "test": "vitest"
   },

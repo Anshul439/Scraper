@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { argv } from 'process';
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
-import { expandOneLevelUnfiltered, expandOneLevelMaximum, expandOneLevel } from './scraper/httpCrawler';
-import { downloadPdf } from './downloader/index';
+import { expandOneLevelUnfiltered, expandOneLevelMaximum, expandOneLevel } from '../scraper/httpCrawler';
+import { downloadPdf } from '../downloader/index';
 
 type ExamConfig = {
   examName: string;

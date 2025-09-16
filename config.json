@@ -2,12 +2,21 @@
   "exams": [
     {
       "examName": "SSC-CHSL",
-      "label": "New site for ssc chsl",
+      "label": "Site for ssc-chsl",
       "examKey": "chsl",
       "seedUrls": [
         "https://www.careerpower.in/ssc-chsl-previous-year-question-paper.html"
       ],
-      "years": ["2023"]
+      "years": ["2023", "2024", "2025"]
+    },
+    {
+      "examName": "IBPS-PO",
+      "label": "Site for ibps-po",
+      "examKey": "ibps",
+      "seedUrls": [
+        "https://www.careerpower.in/ibps-po-previous-year-question-paper.html"
+      ],
+      "years": ["2023", "2024", "2025"]
     }
   ],
   "global": {

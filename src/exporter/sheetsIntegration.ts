@@ -1,7 +1,7 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { TaggedQuestion } from './claudeTagger';
-import { PipelineResult } from './pipelineOrchestrator';
+import { TaggedQuestion } from '../claudePipeline/claudeTagger';
+import { PipelineResult } from '../claudePipeline/pipelineOrchestrator';
 import {
   exportToGoogleSheets,
   exportFromPipelineOutput,

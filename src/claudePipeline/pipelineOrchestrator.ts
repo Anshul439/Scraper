@@ -1,6 +1,6 @@
 import { writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { parsePDFsInDirectoryRecursive, extractQuestionCandidates, getPDFParsingStats, ParsedPDF, QuestionCandidate } from './parser/pdfParser';
+import { parsePDFsInDirectoryRecursive, extractQuestionCandidates, getPDFParsingStats, ParsedPDF, QuestionCandidate } from '../parser/pdfParser';
 import { tagQuestionsWithClaude, TaggingConfig, TaggedQuestion, getTaggingStats, TaggingResult } from './claudeTagger';
 
 export interface PipelineConfig {
@@ -342,14 +342,14 @@ export function createPipelineConfig(
     claude: {
       apiKey: claudeApiKey,
       model: 'claude-sonnet-4-20250514',
-      maxTokens: 4000,
+      maxTokens: 12000,
       temperature: 0.1,
-      batchSize: 20
+      batchSize: 30
     },
     exam: examName ? { name: examName } : undefined,
     options: {
       saveIntermediateResults: true,
-      maxQuestionsPerPDF: 100 // Reasonable limit to avoid overwhelming Claude
+      maxQuestionsPerPDF: 400 // Reasonable limit to avoid overwhelming Claude
     }
   };
 }

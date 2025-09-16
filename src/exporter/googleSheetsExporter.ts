@@ -1,5 +1,5 @@
 import { google } from 'googleapis';
-import { TaggedQuestion } from './claudeTagger';
+import { TaggedQuestion } from '../claudePipeline/claudeTagger';
 import { readFileSync } from 'fs';
 
 export interface SheetsConfig {

@@ -1,6 +1,6 @@
 import { Anthropic } from '@anthropic-ai/sdk';
-import { Question, QuestionType } from './types/index';
-import { QuestionCandidate, ParsedPDF } from './parser/pdfParser';
+import { Question, QuestionType } from '../types/index';
+import { QuestionCandidate, ParsedPDF } from '../parser/pdfParser';
 
 export interface TaggingConfig {
   apiKey: string;
@@ -221,7 +221,7 @@ async function processQuestionBatch(
 
     const response = await client.messages.create({
       model: config.model || 'claude-3-sonnet-20240229',
-      max_tokens: config.maxTokens || 4000,
+      max_tokens: config.maxTokens || 12000,
       temperature: config.temperature || 0.1,
       system: systemPrompt,
       messages: [{
