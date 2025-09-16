@@ -357,49 +357,48 @@ function parseCompleteQuestion(
   };
 }
 
-function determineQuestionType(
-  questionText: string,
-  options: string[]
-): QuestionCandidate["type"] {
-  const lowerText = questionText.toLowerCase();
 
+function determineQuestionType(questionText: string, options: string[]): QuestionCandidate['type'] {
+  const lowerText = questionText.toLowerCase();
+  
   // Has options = MCQ
   if (options.length > 1) {
-    return "mcq";
+    return 'mcq';
   }
-
+  
   // Check for specific question types
   if (/fill.*blank|complete.*sentence/.test(lowerText)) {
-    return "fill_blank";
+    return 'fill_blank';
   }
-
+  
   if (/true.*false|false.*true/.test(lowerText)) {
-    return "true_false";
+    return 'true_false';
   }
-
+  
   if (/rearrange|arrange.*order/.test(lowerText)) {
-    return "mcq"; // Rearrangement questions are typically MCQ
+    return 'mcq'; // Rearrangement questions are typically MCQ
   }
-
+  
   if (/find.*error|choose.*error|error.*sentence/.test(lowerText)) {
-    return "mcq"; // Error detection questions are typically MCQ
+    return 'mcq'; // Error detection questions are typically MCQ
   }
-
+  
   if (/choose.*word|select.*word|substitute/.test(lowerText)) {
-    return "mcq"; // Word choice questions are MCQ
+    return 'mcq'; // Word choice questions are MCQ
   }
-
+  
   if (/calculate|compute|find.*value/.test(lowerText)) {
-    return "integer";
+    return 'integer';
   }
-
+  
   if (/explain|describe|discuss/.test(lowerText)) {
-    return "descriptive";
+    return 'descriptive';
   }
-
+  
   // Default to MCQ for competitive exams
-  return "mcq";
+  return 'mcq';
 }
+
 
 /**
  * Analyze question text to determine type and extract options

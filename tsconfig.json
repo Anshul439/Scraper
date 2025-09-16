@@ -11,6 +11,6 @@
     "resolveJsonModule": true,
     "noImplicitAny": true
   },
-  "include": ["src"],
+  "include": ["src", "manual-export.js"],
   "exclude": ["node_modules", "dist"]
 }

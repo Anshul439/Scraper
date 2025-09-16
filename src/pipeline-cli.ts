@@ -2,6 +2,7 @@
 
 import dotenv from "dotenv";
 dotenv.config();
+import { readFileSync } from 'fs';
 import { argv } from "process";
 import { existsSync } from "fs";
 import {
@@ -90,7 +91,7 @@ function parseCliArgs(): CliArgs {
         i++;
         break;
       case "--share-with":
-        args.shareWith = argv[i + 1].split(',').map(email => email.trim());
+        args.shareWith = argv[i + 1].split(",").map((email) => email.trim());
         i++;
         break;
       case "--group-by-subject":
@@ -216,18 +217,25 @@ function validateArgs(args: CliArgs): string[] {
 
   // Google Sheets validation
   if (args.exportSheets) {
-    const serviceAccountKey = args.serviceAccountKey || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+    const serviceAccountKey =
+      args.serviceAccountKey || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
     if (!serviceAccountKey) {
-      errors.push("Service account key is required for Google Sheets export (use --service-account-key or set GOOGLE_SERVICE_ACCOUNT_KEY env var)");
+      errors.push(
+        "Service account key is required for Google Sheets export (use --service-account-key or set GOOGLE_SERVICE_ACCOUNT_KEY env var)"
+      );
     } else if (!existsSync(serviceAccountKey)) {
-      errors.push(`Service account key file does not exist: ${serviceAccountKey}`);
+      errors.push(
+        `Service account key file does not exist: ${serviceAccountKey}`
+      );
     }
 
     if (args.shareWith) {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      const invalidEmails = args.shareWith.filter(email => !emailRegex.test(email));
+      const invalidEmails = args.shareWith.filter(
+        (email) => !emailRegex.test(email)
+      );
       if (invalidEmails.length > 0) {
-        errors.push(`Invalid email addresses: ${invalidEmails.join(', ')}`);
+        errors.push(`Invalid email addresses: ${invalidEmails.join(", ")}`);
       }
     }
 
@@ -261,7 +269,10 @@ async function runPipelineCli() {
   }
 
   const apiKey = args.claudeApiKey || process.env.CLAUDE_API_KEY!;
-  const serviceAccountKey = args.serviceAccountKey || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  console.log(apiKey);
+
+  const serviceAccountKey =
+    args.serviceAccountKey || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
 
   if (args.dryRun) {
     console.log("DRY RUN MODE - No actual processing will occur");
@@ -274,13 +285,17 @@ Configuration:
   Max Questions/PDF: ${args.maxQuestions || 100}
   Claude API Key: ${apiKey.substring(0, 10)}...
   
-Google Sheets Export: ${args.exportSheets ? 'Enabled' : 'Disabled'}
-${args.exportSheets ? `  Service Account Key: ${serviceAccountKey?.substring(0, 20)}...
-  Share With: ${args.shareWith?.join(', ') || 'None'}
+Google Sheets Export: ${args.exportSheets ? "Enabled" : "Disabled"}
+${
+  args.exportSheets
+    ? `  Service Account Key: ${serviceAccountKey?.substring(0, 20)}...
+  Share With: ${args.shareWith?.join(", ") || "None"}
   Group By Subject: ${args.groupBySubject || false}
   Include Metadata: ${args.includeMetadata || false}
   Max Per Sheet: ${args.maxPerSheet || 1000}
-  Spreadsheet ID: ${args.spreadsheetId || 'New spreadsheet'}` : ''}
+  Spreadsheet ID: ${args.spreadsheetId || "New spreadsheet"}`
+    : ""
+}
     `);
 
     try {
@@ -339,7 +354,9 @@ ${args.exportSheets ? `  Service Account Key: ${serviceAccountKey?.substring(0, 
 
       console.log(`\nProcessing Summary:`);
       console.log(`  - PDFs processed: ${result.summary.pdfsProcessed}`);
-      console.log(`  - Questions extracted: ${result.summary.questionsExtracted}`);
+      console.log(
+        `  - Questions extracted: ${result.summary.questionsExtracted}`
+      );
       console.log(`  - Questions tagged: ${result.summary.questionsTagged}`);
       console.log(`  - Time elapsed: ${result.summary.timeElapsed}`);
 
@@ -357,7 +374,7 @@ ${args.exportSheets ? `  Service Account Key: ${serviceAccountKey?.substring(0, 
             shareWithEmails: args.shareWith,
             groupBySubject: args.groupBySubject,
             includeMetadata: args.includeMetadata,
-            maxQuestionsPerSheet: args.maxPerSheet
+            maxQuestionsPerSheet: args.maxPerSheet,
           }
         );
 
@@ -367,13 +384,13 @@ ${args.exportSheets ? `  Service Account Key: ${serviceAccountKey?.substring(0, 
           console.log(`\nGoogle Sheets export completed successfully!`);
           console.log(`Spreadsheet URL: ${sheetsResult.spreadsheetUrl}`);
           console.log(`Rows exported: ${sheetsResult.rowsExported}`);
-          
+
           if (args.shareWith && args.shareWith.length > 0) {
-            console.log(`Shared with: ${args.shareWith.join(', ')}`);
+            console.log(`Shared with: ${args.shareWith.join(", ")}`);
           }
         } else {
           console.error("\nGoogle Sheets export failed!");
-          sheetsResult.errors.forEach(error => console.error(`  - ${error}`));
+          sheetsResult.errors.forEach((error) => console.error(`  - ${error}`));
         }
       }
 
@@ -404,15 +421,62 @@ ${args.exportSheets ? `  Service Account Key: ${serviceAccountKey?.substring(0, 
 }
 
 // Helper function to run pipeline for all exam directories with Google Sheets export
+// Helper function to load configuration
+function loadConfig(): any {
+  try {
+    const configPath = './config.json';
+    if (existsSync(configPath)) {
+      const configData = readFileSync(configPath, 'utf8');
+      return JSON.parse(configData);
+    }
+  } catch (error) {
+    console.log('No config.json found or invalid JSON, using environment variables and defaults');
+  }
+  return null;
+}
+
+// Helper function to run pipeline for all exam directories with Google Sheets export
 async function runForAllExams() {
   const args = parseCliArgs();
+  const config = loadConfig();
   const baseDir = "./data"; // Adjust based on your structure
-  const outputDir = "./processed-questions";
+  const outputBaseDir = "./processed-questions";
   const apiKey = process.env.CLAUDE_API_KEY;
-  const serviceAccountKey = args.serviceAccountKey || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  
+  // Get spreadsheet ID from CLI args, config file, or environment variable
+  let spreadsheetId = args.spreadsheetId;
+  if (!spreadsheetId && config?.googleSheets?.spreadsheetId) {
+    spreadsheetId = config.googleSheets.spreadsheetId;
+  }
+  if (!spreadsheetId) {
+    spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
+  }
+  
+  // Get service account key from CLI args, config file, or environment variable
+  let serviceAccountKey = args.serviceAccountKey;
+  if (!serviceAccountKey && config?.googleSheets?.serviceAccountKeyPath) {
+    serviceAccountKey = config.googleSheets.serviceAccountKeyPath;
+  }
+  if (!serviceAccountKey) {
+    serviceAccountKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  }
 
   if (!apiKey) {
     console.error("CLAUDE_API_KEY environment variable is required");
+    process.exit(1);
+  }
+
+  if (args.exportSheets && !serviceAccountKey) {
+    console.error("Google service account key is required for sheets export");
+    process.exit(1);
+  }
+
+  if (args.exportSheets && !spreadsheetId) {
+    console.error("Google spreadsheet ID is required for sheets export");
+    console.error("Please provide it via:");
+    console.error("  1. --spreadsheet-id flag");
+    console.error("  2. GOOGLE_SPREADSHEET_ID environment variable");
+    console.error("  3. config.json file");
     process.exit(1);
   }
 
@@ -444,23 +508,30 @@ async function runForAllExams() {
       try {
         const result = await runPipelineForExam(
           join(baseDir, examDir),
-          outputDir,
+          outputBaseDir,
           apiKey,
           examDir
         );
 
+        // IMPORTANT: Use the actual output directory from the pipeline result
+        // The runPipelineForExam function creates: outputBaseDir/processed/examDir
+        const actualOutputDir = join(outputBaseDir, "processed", examDir);
+
         examResults.push({
           examName: examDir,
           pipelineResult: result,
-          outputDir: join(outputDir, 'processed', examDir)
+          outputDir: actualOutputDir  // Pass the correct path where files are actually saved
         });
 
         if (result.success) {
           console.log(`✅ Successfully processed ${examDir}`);
           console.log(`   Questions tagged: ${result.summary.questionsTagged}`);
+          console.log(`   Output saved to: ${actualOutputDir}`);
         } else {
           console.error(`❌ Failed to process ${examDir}`);
-          result.errors.forEach((error: string) => console.error(`   - ${error}`));
+          result.errors.forEach((error: string) =>
+            console.error(`   - ${error}`)
+          );
         }
       } catch (error) {
         console.error(
@@ -476,37 +547,45 @@ async function runForAllExams() {
     }
 
     // Export to Google Sheets if enabled
-    if (args.exportSheets && serviceAccountKey && examResults.length > 0) {
+    if (args.exportSheets && serviceAccountKey && spreadsheetId && examResults.length > 0) {
       console.log(`\n${"=".repeat(80)}`);
       console.log("EXPORTING ALL EXAMS TO GOOGLE SHEETS");
       console.log(`${"=".repeat(80)}`);
+      console.log(`📊 Using spreadsheet ID: ${spreadsheetId}`);
 
       const sheetsConfig = createPipelineToSheetsConfig(
-        outputDir,
+        outputBaseDir, // This is less important for multi-exam export
         serviceAccountKey,
         {
+          spreadsheetId: spreadsheetId, // Make sure to pass the spreadsheet ID
           shareWithEmails: args.shareWith,
           groupBySubject: false, // Don't group by subject for multi-exam
           includeMetadata: args.includeMetadata,
-          maxQuestionsPerSheet: args.maxPerSheet
+          maxQuestionsPerSheet: args.maxPerSheet,
         }
       );
 
       const multiExamResult = await exportMultipleExamsToSheets(
-        examResults.filter(r => r.pipelineResult.success),
+        examResults.filter((r) => r.pipelineResult.success),
         {
           sheets: sheetsConfig.sheets,
-          export: sheetsConfig.export
+          export: sheetsConfig.export,
         }
       );
 
       if (multiExamResult.success) {
         console.log(`\n✅ Multi-exam Google Sheets export completed!`);
         console.log(`📊 Spreadsheet URL: ${multiExamResult.spreadsheetUrl}`);
-        console.log(`📈 Total successful exports: ${multiExamResult.results.filter(r => r.result.success).length}`);
+        console.log(
+          `📈 Total successful exports: ${
+            multiExamResult.results.filter((r) => r.result.success).length
+          }`
+        );
       } else {
         console.error(`\n❌ Multi-exam Google Sheets export had errors:`);
-        multiExamResult.errors.forEach(error => console.error(`  - ${error}`));
+        multiExamResult.errors.forEach((error) =>
+          console.error(`  - ${error}`)
+        );
       }
     }
 

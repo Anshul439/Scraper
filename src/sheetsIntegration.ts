@@ -1,5 +1,5 @@
-import { join } from 'path';
 import { existsSync } from 'fs';
+import { join } from 'path';
 import { TaggedQuestion } from './claudeTagger';
 import { PipelineResult } from './pipelineOrchestrator';
 import {
@@ -73,11 +73,13 @@ export function createPipelineToSheetsConfig(
   } = {}
 ): PipelineToSheetsConfig {
   
-  const sheetsConfig = createSheetsConfig(serviceAccountKeyPath, {
-    spreadsheetId: options.spreadsheetId,
-    createNewSpreadsheet: !options.spreadsheetId,
-    shareWithEmails: options.shareWithEmails
-  });
+  const sheetsConfig = createSheetsConfig(
+    serviceAccountKeyPath,
+    options.spreadsheetId || '', // Ensure we have a spreadsheet ID
+    {
+      shareWithEmails: options.shareWithEmails
+    }
+  );
 
   const exportOptions: ExportOptions = {
     groupBySubject: options.groupBySubject || false,
@@ -105,7 +107,7 @@ export async function exportMultipleExamsToSheets(
   examResults: Array<{
     examName: string;
     pipelineResult: PipelineResult;
-    outputDir: string;
+    outputDir: string;  // This should be the actual output directory where files are saved
   }>,
   config: Omit<PipelineToSheetsConfig, 'pipeline'>
 ): Promise<{
@@ -117,24 +119,63 @@ export async function exportMultipleExamsToSheets(
   
   const results: Array<{ examName: string; result: SheetsExportResult }> = [];
   const errors: string[] = [];
-  let spreadsheetId: string | undefined;
+  const spreadsheetId: string = config.sheets.spreadsheetId; // Use the provided spreadsheet ID
   let spreadsheetUrl: string | undefined;
 
   console.log(`\n📊 Exporting ${examResults.length} exams to Google Sheets...`);
+  console.log(`📊 Using spreadsheet ID: ${spreadsheetId}`);
+
+  if (!spreadsheetId) {
+    const errorMsg = 'No spreadsheet ID provided for multi-exam export';
+    console.error(`❌ ${errorMsg}`);
+    errors.push(errorMsg);
+    return {
+      success: false,
+      spreadsheetUrl: undefined,
+      results: [],
+      errors: [errorMsg]
+    };
+  }
 
   for (let i = 0; i < examResults.length; i++) {
     const { examName, pipelineResult, outputDir } = examResults[i];
     
     console.log(`\n[${i + 1}/${examResults.length}] Exporting ${examName}...`);
     
+    // Use the actual outputDir where the tagged-questions.json file is located
+    const taggedQuestionsPath = pipelineResult.outputs.taggedQuestions || 
+                               join(outputDir, 'tagged-questions.json');
+    
+    console.log(`📂 Looking for tagged questions at: ${taggedQuestionsPath}`);
+    
+    // Verify the file exists before proceeding
+    if (!existsSync(taggedQuestionsPath)) {
+      const errorMsg = `Tagged questions file not found at: ${taggedQuestionsPath}`;
+      console.error(`❌ ${errorMsg}`);
+      errors.push(`${examName}: ${errorMsg}`);
+      
+      results.push({
+        examName,
+        result: {
+          success: false,
+          sheetName: `${examName}_Questions`,
+          rowsExported: 0,
+          errors: [errorMsg],
+          spreadsheetId: spreadsheetId,
+          spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`
+        }
+      });
+      continue;
+    }
+    
     const examConfig: PipelineToSheetsConfig = {
       pipeline: {
         outputDir,
-        taggedQuestionsFile: join(outputDir, 'tagged-questions.json')
+        taggedQuestionsFile: taggedQuestionsPath  // Use the verified path
       },
       sheets: {
         ...config.sheets,
-        spreadsheetId: spreadsheetId, // Use same spreadsheet for all exams
+        spreadsheetId: spreadsheetId, // Ensure spreadsheet ID is preserved
         sheetName: `${examName}_Questions`
       },
       export: {
@@ -149,9 +190,8 @@ export async function exportMultipleExamsToSheets(
       results.push({ examName, result });
       
       if (result.success) {
-        // Store the spreadsheet ID for subsequent exports
-        if (!spreadsheetId && result.spreadsheetId) {
-          spreadsheetId = result.spreadsheetId;
+        // Set the spreadsheet URL if we don't have it yet
+        if (!spreadsheetUrl && result.spreadsheetUrl) {
           spreadsheetUrl = result.spreadsheetUrl;
         }
         
@@ -172,7 +212,9 @@ export async function exportMultipleExamsToSheets(
           success: false,
           sheetName: examConfig.sheets.sheetName || 'Questions',
           rowsExported: 0,
-          errors: [errorMsg]
+          errors: [errorMsg],
+          spreadsheetId: spreadsheetId,
+          spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`
         }
       });
     }
