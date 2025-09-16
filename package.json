@@ -1,22 +1,37 @@
 {
-  "name": "Scraper",
+  "name": "question-extraction-pipeline",
   "version": "1.0.0",
-  "description": "",
+  "description": "Dynamic pipeline to create high quality dataset of government exam papers",
   "main": "index.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only src/cli.ts"
+    "dev": "ts-node-dev --respawn --transpile-only src/cli.ts",
+    "pipeline": "ts-node-dev --respawn --transpile-only src/pipeline-cli.ts",
+    "build": "tsc",
+    "test": "vitest"
   },
-  "keywords": [],
+  "keywords": [
+    "exam",
+    "pdf",
+    "extraction",
+    "ai",
+    "dataset",
+    "government"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.2",
     "@google/generative-ai": "^0.24.1",
     "axios": "^1.12.1",
     "cheerio": "^1.1.2",
-    "googleapis": "^159.0.0"
+    "dotenv": "^17.2.2",
+    "googleapis": "^159.0.0",
+    "pdf-parse": "^1.1.1"
   },
   "devDependencies": {
+    "@types/dotenv": "^8.2.3",
     "@types/node": "^24.3.3",
+    "@types/pdf-parse": "^1.1.1",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4",
