@@ -1,25 +1,9 @@
 #!/usr/bin/env node
 import { argv } from 'process';
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
-import { expandOneLevelUnfiltered, expandOneLevelMaximum, expandOneLevel } from '../scraper/httpCrawler';
-import { downloadPdf } from '../downloader/index';
-
-type ExamConfig = {
-  examName: string;
-  label?: string;
-  examKey?: string;  // NEW: keyword for filtering PDFs
-  seedUrls: string[];
-  years?: string[];  // Array of years for filtering
-  usePuppeteer?: boolean;
-};
-
-type AppConfig = {
-  exams: ExamConfig[];
-  global?: {
-    outDir?: string;
-    defaultMaxDownloadsPerExam?: number;
-  };
-};
+import { expandOneLevelUnfiltered, expandOneLevelMaximum, expandOneLevel } from '../crawler';
+import { downloadPdf } from '../downloader';
+import { AppConfig } from '../types/config.types';
 
 function loadConfig(path = './config.json'): AppConfig {
   if (!existsSync(path)) throw new Error(`Config not found at ${path}`);

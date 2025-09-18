@@ -1,42 +1,7 @@
 import { Anthropic } from '@anthropic-ai/sdk';
-import { Question, QuestionType } from '../types/index';
-import { QuestionCandidate, ParsedPDF } from '../parser/pdfParser';
-
-export interface TaggingConfig {
-  apiKey: string;
-  model?: string;
-  maxTokens?: number;
-  temperature?: number;
-  batchSize?: number;
-}
-
-export interface TaggedQuestion extends Question {
-  confidence: number;
-  rawClaudeResponse?: string;
-  processingTimestamp: string;
-}
-
-export interface ExamContext {
-  examKey: string;
-  examFullName?: string;
-  year?: string;
-  description?: string;
-  knownSubjects?: string[];
-  commonTopics?: string[];
-}
-
-export interface TaggingResult {
-  success: boolean;
-  taggedQuestions: TaggedQuestion[];
-  errors: string[];
-  stats: {
-    totalProcessed: number;
-    successful: number;
-    failed: number;
-    totalTokensUsed?: number;
-  };
-}
-
+import { ExamContext, TaggingConfig, TaggingResult } from '../types/claude.types';
+import { ParsedPDF } from '../types/pdf.types';
+import { QuestionCandidate, QuestionType, TaggedQuestion } from '../types/questions.types';
 /**
  * Initialize Claude AI client
  */
@@ -252,18 +217,17 @@ async function processQuestionBatch(
         id: question.id,
         examKey: examContext.examKey,
         year: examContext.year,
-        fileName: '', // Will be set by caller
+        fileName: '',
         pageNo: question.pageNumber,
         text: question.text,
         options: question.options,
-        answer: null, // Could be enhanced to detect answers
+        answer: null,
         questionType: mapQuestionType(claudeAnalysis.questionType || question.type),
         subject: claudeAnalysis.subject || 'Unknown',
         topics: claudeAnalysis.topics || [],
         difficulty: claudeAnalysis.difficulty || 'unknown',
         extraTags: claudeAnalysis.extraTags || [],
         confidence: claudeAnalysis.confidence || 0.5,
-        // rawClaudeResponse: responseText,
         processingTimestamp: new Date().toISOString(),
         provenance: {
           sourceUrl: '',
@@ -318,7 +282,7 @@ export async function tagQuestionsWithClaude(
 ): Promise<TaggingResult> {
   const client = initClaudeClient(config);
   const examContext = createExamContext(parsedPDFs);
-  const batchSize = config.batchSize || 20; // Process 5 questions at a time
+  const batchSize = config.batchSize || 20;
   
   console.log(`\n=== Starting Claude AI Tagging ===`);
   console.log(`Exam Context: ${examContext.examFullName} (${examContext.examKey})`);
@@ -347,10 +311,8 @@ export async function tagQuestionsWithClaude(
     const batchResult = await processQuestionBatch(client, batch, examContext, config);
     
     if (batchResult.success) {
-      // Set fileName from source PDF
       batchResult.results.forEach((taggedQ, index) => {
         const originalQ = batch[index];
-        // Find the PDF this question came from
         const sourcePDF = parsedPDFs.find(pdf => 
           pdf.pages.some(page => page.pageNumber === originalQ.pageNumber)
         );

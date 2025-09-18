@@ -1,43 +1,8 @@
 import pdf from "pdf-parse";
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join, extname } from "path";
-
-export interface ParsedPDF {
-  fileName: string;
-  filePath: string;
-  totalPages: number;
-  rawText: string;
-  pages: ParsedPage[];
-  metadata: {
-    examKey?: string;
-    year?: string;
-    extractedAt: string;
-    fileSize: number;
-  };
-}
-
-export interface ParsedPage {
-  pageNumber: number;
-  text: string;
-  wordCount: number;
-}
-
-export interface QuestionCandidate {
-  id: string;
-  text: string;
-  pageNumber: number;
-  startIndex: number;
-  endIndex: number;
-  type:
-    | "mcq"
-    | "descriptive"
-    | "true_false"
-    | "fill_blank"
-    | "integer"
-    | "unknown";
-  options?: string[];
-  hasAnswer?: boolean;
-}
+import { ParsedPage, ParsedPDF } from "./types/pdf.types";
+import { QuestionCandidate } from "./types/questions.types";
 
 /**
  * Parse a single PDF file and extract text content
@@ -51,7 +16,6 @@ export async function parsePDF(filePath: string): Promise<ParsedPDF> {
     const fileName = filePath.split("/").pop() || "";
     const fileStats = statSync(filePath);
 
-    // Try to extract year from filename or path
     const yearMatch = fileName.match(/\b(20\d{2})\b/);
     const examKeyMatch = fileName
       .toLowerCase()
@@ -59,7 +23,6 @@ export async function parsePDF(filePath: string): Promise<ParsedPDF> {
         /\b(chsl|cgl|po|clerk|ssc|ibps|rrb|upsc|neet|jee|cat|gate|railways|banking|defence)\b/
       );
 
-    // Split text into pages (approximate)
     const pages = splitIntoPages(data.text, data.numpages);
 
     return {
@@ -140,15 +103,14 @@ export async function parsePDFsInDirectoryRecursive(
 function splitIntoPages(text: string, numPages: number): ParsedPage[] {
   if (!text || numPages <= 0) return [];
 
-  // Try to split by page indicators first
   let pageTexts: string[] = [];
 
   // Look for common page indicators
   const pageIndicators = [
-    /\f/g, // Form feed character
+    /\f/g,
     /Page\s*\d+/gi,
-    /\d+\s*\/\s*\d+/g, // Page numbers like "1/10"
-    /-\s*\d+\s*-/g, // Page numbers like "- 1 -"
+    /\d+\s*\/\s*\d+/g,
+    /-\s*\d+\s*-/g,
   ];
 
   let splitText = text;
@@ -207,8 +169,6 @@ function extractQuestionsFromPage(
   const text = page.text;
   let questionId = startId;
 
-  // IMPROVED: Pattern for complete MCQ questions with options
-  // Matches: Q.1 ... Q.2 or end of text, capturing everything including options
   const mcqQuestionPattern = /(?:^|\n)\s*Q\.(\d+)\s+(.*?)(?=\n\s*Q\.\d+|$)/gs;
 
   let match;
@@ -217,7 +177,6 @@ function extractQuestionsFromPage(
     const startIndex = match.index;
     const endIndex = startIndex + fullMatch.length;
 
-    // Parse the complete question content
     const parsedQuestion = parseCompleteQuestion(
       questionContent.trim(),
       questionNum
@@ -239,7 +198,6 @@ function extractQuestionsFromPage(
     }
   }
 
-  // Fallback: If no Q.1 Q.2 format found, try numbered questions
   if (questions.length === 0) {
     const numberedQuestionPattern =
       /(?:^|\n)\s*(\d+)[\.\)]\s+(.*?)(?=\n\s*\d+[\.\)]|$)/gs;
@@ -293,15 +251,13 @@ function parseCompleteQuestion(
   const options: string[] = [];
   let hasAnswer = false;
 
-  let currentSection = "question"; // 'question', 'options', 'answer'
+  let currentSection = "question";
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Check if this line starts options section
     if (/^Ans\s+1\./.test(line) || /^1\./.test(line)) {
       currentSection = "options";
-      // Extract first option from this line
       const optionMatch = line.match(/^(?:Ans\s+)?(\d+)\.\s*(.+)$/);
       if (optionMatch) {
         options.push(`${optionMatch[1]}. ${optionMatch[2]}`);
@@ -309,27 +265,22 @@ function parseCompleteQuestion(
       continue;
     }
 
-    // Check if this line is an answer indicator
     if (/^Question ID|^Status|^Chosen Option/.test(line)) {
       currentSection = "metadata";
       hasAnswer = true;
       continue;
     }
 
-    // Process based on current section
     switch (currentSection) {
       case "question":
-        // Accumulate question text
         questionText += (questionText ? " " : "") + line;
         break;
 
       case "options":
-        // Check if this is a numbered option
         const optionMatch = line.match(/^(\d+)\.\s*(.+)$/);
         if (optionMatch) {
           options.push(`${optionMatch[1]}. ${optionMatch[2]}`);
         } else {
-          // Might be continuation of previous option or question text
           if (options.length === 0) {
             questionText += " " + line;
           }
@@ -337,7 +288,6 @@ function parseCompleteQuestion(
         break;
 
       case "metadata":
-        // Skip metadata lines
         break;
     }
   }
@@ -363,7 +313,6 @@ function determineQuestionType(
 ): QuestionCandidate["type"] {
   const lowerText = questionText.toLowerCase();
 
-  // Has options = MCQ
   if (options.length > 1) {
     return "mcq";
   }
@@ -378,15 +327,15 @@ function determineQuestionType(
   }
 
   if (/rearrange|arrange.*order/.test(lowerText)) {
-    return "mcq"; // Rearrangement questions are typically MCQ
+    return "mcq";
   }
 
   if (/find.*error|choose.*error|error.*sentence/.test(lowerText)) {
-    return "mcq"; // Error detection questions are typically MCQ
+    return "mcq";
   }
 
   if (/choose.*word|select.*word|substitute/.test(lowerText)) {
-    return "mcq"; // Word choice questions are MCQ
+    return "mcq";
   }
 
   if (/calculate|compute|find.*value/.test(lowerText)) {
@@ -397,7 +346,6 @@ function determineQuestionType(
     return "descriptive";
   }
 
-  // Default to MCQ for competitive exams
   return "mcq";
 }
 
@@ -481,7 +429,6 @@ function analyzeQuestionText(text: string): {
 function extractMCQOptions(text: string): string[] {
   const options: string[] = [];
 
-  // Pattern 1: a) option b) option
   const pattern1 = /\b([a-d])\)\s*([^)]+?)(?=\s*[a-d]\)|$)/gi;
   let match1;
   while ((match1 = pattern1.exec(text)) !== null) {
@@ -490,7 +437,6 @@ function extractMCQOptions(text: string): string[] {
 
   if (options.length > 0) return options;
 
-  // Pattern 2: (a) option (b) option
   const pattern2 = /\(([a-d])\)\s*([^(]+?)(?=\s*\([a-d]\)|$)/gi;
   let match2;
   while ((match2 = pattern2.exec(text)) !== null) {
@@ -499,7 +445,6 @@ function extractMCQOptions(text: string): string[] {
 
   if (options.length > 0) return options;
 
-  // Pattern 3: a. option b. option
   const pattern3 = /\b([a-d])\.?\s*([^.]+?)(?=\s*[a-d]\.|$)/gi;
   let match3;
   while ((match3 = pattern3.exec(text)) !== null) {

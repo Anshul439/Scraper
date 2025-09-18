@@ -1,43 +1,11 @@
 import { writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { parsePDFsInDirectoryRecursive, extractQuestionCandidates, getPDFParsingStats, ParsedPDF, QuestionCandidate } from '../parser/pdfParser';
-import { tagQuestionsWithClaude, TaggingConfig, TaggedQuestion, getTaggingStats, TaggingResult } from './claudeTagger';
-
-export interface PipelineConfig {
-  inputDir: string;
-  outputDir: string;
-  claude: TaggingConfig;
-  exam?: {
-    name: string;
-    year?: string;
-    customContext?: {
-      subjects?: string[];
-      topics?: string[];
-    };
-  };
-  options?: {
-    saveIntermediateResults?: boolean;
-    skipQuestionExtraction?: boolean;
-    maxQuestionsPerPDF?: number;
-  };
-}
-
-export interface PipelineResult {
-  success: boolean;
-  summary: {
-    pdfsProcessed: number;
-    questionsExtracted: number;
-    questionsTagged: number;
-    timeElapsed: string;
-  };
-  outputs: {
-    rawPDFData?: string;
-    extractedQuestions?: string;
-    taggedQuestions: string;
-    statistics: string;
-  };
-  errors: string[];
-}
+import { parsePDFsInDirectoryRecursive, extractQuestionCandidates, getPDFParsingStats } from '../pdfParser';
+import { tagQuestionsWithClaude, getTaggingStats } from './claudeTagger';
+import { PipelineConfig, PipelineResult } from '../types/pipeline.types';
+import { TaggingResult } from '../types/claude.types';
+import { QuestionCandidate } from '../types/questions.types';
+import { ParsedPDF } from '../types/pdf.types';
 
 /**
  * Main pipeline function - orchestrates the entire process
@@ -282,7 +250,6 @@ function generateHumanReadableSummary(stats: any, config: PipelineConfig): strin
   });
   lines.push('');
 
-  // Claude AI tagging results
   lines.push('CLAUDE AI TAGGING:');
   lines.push(`  Successfully Tagged: ${stats.pipeline.claudeTagging.processing.successful}`);
   lines.push(`  Failed: ${stats.pipeline.claudeTagging.processing.failed}`);
@@ -311,7 +278,6 @@ function generateHumanReadableSummary(stats: any, config: PipelineConfig): strin
   });
   lines.push('');
 
-  // Errors (if any)
   if (stats.pipeline.claudeTagging.processing.errors.length > 0) {
     lines.push('ERRORS/WARNINGS:');
     stats.pipeline.claudeTagging.processing.errors.forEach((error: string) => {
@@ -349,7 +315,7 @@ export function createPipelineConfig(
     exam: examName ? { name: examName } : undefined,
     options: {
       saveIntermediateResults: true,
-      maxQuestionsPerPDF: 400 // Reasonable limit to avoid overwhelming Claude
+      maxQuestionsPerPDF: 400
     }
   };
 }

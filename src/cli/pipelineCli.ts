@@ -18,7 +18,7 @@ import {
   getGoogleSheetsSetupInstructions,
 } from "../exporter/sheetsIntegration";
 
-interface CliArgs {
+export interface CliArgs {
   inputDir?: string;
   outputDir?: string;
   claudeApiKey?: string;
@@ -27,7 +27,6 @@ interface CliArgs {
   maxQuestions?: number;
   help?: boolean;
   dryRun?: boolean;
-  // Google Sheets options
   exportSheets?: boolean;
   serviceAccountKey?: string;
   shareWith?: string[];
@@ -420,8 +419,6 @@ ${
   }
 }
 
-// Helper function to run pipeline for all exam directories with Google Sheets export
-// Helper function to load configuration
 function loadConfig(): any {
   try {
     const configPath = './config.json';
@@ -435,7 +432,6 @@ function loadConfig(): any {
   return null;
 }
 
-// Helper function to run pipeline for all exam directories with Google Sheets export
 async function runForAllExams() {
   const args = parseCliArgs();
   const config = loadConfig();
@@ -513,8 +509,6 @@ async function runForAllExams() {
           examDir
         );
 
-        // IMPORTANT: Use the actual output directory from the pipeline result
-        // The runPipelineForExam function creates: outputBaseDir/processed/examDir
         const actualOutputDir = join(outputBaseDir, "processed", examDir);
 
         examResults.push({
@@ -557,9 +551,9 @@ async function runForAllExams() {
         outputBaseDir, // This is less important for multi-exam export
         serviceAccountKey,
         {
-          spreadsheetId: spreadsheetId, // Make sure to pass the spreadsheet ID
+          spreadsheetId: spreadsheetId,
           shareWithEmails: args.shareWith,
-          groupBySubject: false, // Don't group by subject for multi-exam
+          groupBySubject: false,
           includeMetadata: args.includeMetadata,
           maxQuestionsPerSheet: args.maxPerSheet,
         }

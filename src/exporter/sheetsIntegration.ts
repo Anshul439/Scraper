@@ -1,24 +1,12 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { TaggedQuestion } from '../claudePipeline/claudeTagger';
-import { PipelineResult } from '../claudePipeline/pipelineOrchestrator';
 import {
   exportToGoogleSheets,
   exportFromPipelineOutput,
-  createSheetsConfig,
-  SheetsConfig,
-  ExportOptions,
-  SheetsExportResult
+  createSheetsConfig
 } from './googleSheetsExporter';
-
-export interface PipelineToSheetsConfig {
-  pipeline: {
-    outputDir: string;
-    taggedQuestionsFile?: string;
-  };
-  sheets: SheetsConfig;
-  export: ExportOptions;
-}
+import { PipelineResult } from '../types/pipeline.types';
+import { ExportOptions, PipelineToSheetsConfig, SheetsConfig, SheetsExportResult } from '../types/sheets.types';
 
 /**
  * Export pipeline results to Google Sheets

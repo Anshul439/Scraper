@@ -1,31 +1,7 @@
 import { google } from 'googleapis';
-import { TaggedQuestion } from '../claudePipeline/claudeTagger';
 import { readFileSync } from 'fs';
-
-export interface SheetsConfig {
-  serviceAccountKey: string | object;
-  spreadsheetId: string;
-  sheetName?: string;
-  shareWithEmails?: string[];
-}
-
-export interface SheetsExportResult {
-  success: boolean;
-  spreadsheetId: string;
-  spreadsheetUrl: string;
-  sheetName: string;
-  rowsExported: number;
-  errors: string[];
-}
-
-export interface ExportOptions {
-  includeConfidenceScore?: boolean;
-  includeProcessingTimestamp?: boolean;
-  includeProvenance?: boolean;
-  maxQuestionsPerSheet?: number;
-  groupBySubject?: boolean;
-  sortBy?: 'subject' | 'difficulty' | 'confidence' | 'pageNo';
-}
+import { TaggedQuestion } from '../types/questions.types';
+import { ExportOptions, SheetsConfig, SheetsExportResult } from '../types/sheets.types';
 
 /**
  * Initialize Google Sheets API client

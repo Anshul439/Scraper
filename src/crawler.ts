@@ -45,10 +45,8 @@ export function filterPdfsForExam(
       hasExamMatch = examPatterns.some(pattern => pattern.test(urlLower));
     }
     
-    // Must contain target year
     const hasTargetYear = yearPattern.test(url);
     
-    // Must have question paper indicators
     const hasQuestionPaperKeywords = /\b(question|paper|previous|past|model|sample|set|tier|phase|shift|slot|exam|english|hindi|mathematics|reasoning|general|knowledge|gk|quantitative|aptitude|computer|awareness)\b/i.test(urlLower);
     
     if (pdfUrls.indexOf(url) < 5) {
@@ -84,7 +82,6 @@ function buildExamKeyPatterns(examKey: string): RegExp[] {
   
   // Pattern 2: Handle different separators and formats
   if (cleanKey.length >= 2) {
-    // Allow for common separations like "ssc-chsl", "ssc_chsl", "sscchsl"
     const flexibleKey = cleanKey.split('').join('[-_\\s]*');
     patterns.push(new RegExp(`\\b${flexibleKey}\\b`, 'i'));
     
@@ -122,8 +119,7 @@ function buildDynamicExamPatterns(examName: string): RegExp[] {
     
     // Pattern 3: Handle as separate words
     const parts = cleanName.split(/[-_\s]+/).filter(Boolean);
-    if (parts.length >= 2) {
-      // Match all parts in sequence with flexible separators
+    if (parts.length >= 2) {\\
       const flexiblePattern = parts.map(escapeRegex).join('[-_\\s]*');
       patterns.push(new RegExp(`\\b${flexiblePattern}\\b`, 'i'));
       
@@ -141,7 +137,6 @@ function buildDynamicExamPatterns(examName: string): RegExp[] {
     patterns.push(new RegExp(`\\b${escapeRegex(compact)}\\b`, 'i'));
   }
   
-  // Debug: log patterns
   console.log(`Exam patterns for "${examName}":`, patterns.map(p => p.source));
   
   return patterns;
@@ -193,13 +188,11 @@ function parsePageForLinks(html: string, baseUrl: string, strategy: 'conservativ
     
     aggressive: /(question|paper|previous|past|archive|downloads?|exam|pdf|download|year|result|notification|admit|card|syllabus|recruitment|selection|commission|tier|phase|shift|slot|english|hindi|mathematics|reasoning|general|knowledge|gk|current|affairs|quantitative|aptitude|computer|awareness|ssc|upsc|ibps|rrb|bank|railway|defence|police|teaching|clerk|officer|junior|senior|assistant|grade|level|post|vacancy|job|career|employment|govt|government|public|service|civil|administrative|technical|non.technical|group|category|pay|scale|salary|allowance|benefit|eligibility|qualification|age|limit|fee|application|form|online|offline|registration|login|admit|hall|ticket|call|letter|interview|medical|document|verification|final|merit|list|cut.off|marks|score|rank|percentile|normalization|answer|key|solution|explanation|analysis|review|feedback|complaint|objection|challenge|revised|updated|latest|new|current|recent|today|yesterday|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|2020|2021|2022|2023|2024|2025)/i,
     
-    maximum: /./  // Match almost everything except obvious exclusions
+    maximum: /./
   };
 
-  // URLs to definitely skip
   const SKIP_PATTERNS = /(mailto:|tel:|javascript:|#$|\.jpg|\.jpeg|\.png|\.gif|\.svg|\.css|\.js|facebook|twitter|instagram|linkedin|youtube|whatsapp|telegram|login\.php|register\.php|signup\.php|\.xml|\.rss|\.atom)/i;
 
-  // Text patterns to skip
   const SKIP_TEXT_PATTERNS = /(privacy.policy|terms.of.use|terms.and.conditions|disclaimer|copyright|contact.us|about.us|help|faq|site.map|accessibility|user.manual|technical.support|customer.care|grievance|rtl|right.to.information)/i;
 
   $('a[href]').each((_, el) => {
@@ -238,7 +231,6 @@ function parsePageForLinks(html: string, baseUrl: string, strategy: 'conservativ
       
       shouldFollow = hasGoodIndicators && !hasBadIndicators;
     } else {
-      // Use the strategy-specific pattern
       const pattern = strategies[strategy];
       shouldFollow = pattern.test(abs) || pattern.test(combinedText);
     }
@@ -294,7 +286,6 @@ export async function discoverAllPdfsRecursive(
 
     if (seenPages.has(url) || depth > maxDepth) continue;
 
-    // Only follow same hostname
     try {
       const host = new URL(url).hostname;
       if (host !== seedHost) continue;
@@ -364,14 +355,12 @@ function getPriorityScore(url: string): number {
   let score = 0;
   const urlLower = url.toLowerCase();
   
-  // High priority indicators
   if (/\b(pdf|download|question|paper|previous|exam|archive)\b/.test(urlLower)) score += 10;
-  if (/\b(20(1[5-9]|2[0-5]))\b/.test(urlLower)) score += 8; // Recent years
+  if (/\b(20(1[5-9]|2[0-5]))\b/.test(urlLower)) score += 8;
   if (/\b(tier|phase|shift|english|hindi|mathematics|reasoning|gk)\b/.test(urlLower)) score += 6;
   if (/\b(recruitment|selection|notification|result)\b/.test(urlLower)) score += 4;
-  if (/\b(chsl|cgl|po|clerk|officer|assistant|ssc|ibps|rrb)\b/.test(urlLower)) score += 5; // Common exam keywords
+  if (/\b(chsl|cgl|po|clerk|officer|assistant|ssc|ibps|rrb)\b/.test(urlLower)) score += 5;
   
-  // Penalty for deep paths
   const pathDepth = (url.match(/\//g) || []).length;
   score -= Math.max(0, pathDepth - 5);
   
