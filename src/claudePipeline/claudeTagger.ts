@@ -221,7 +221,7 @@ async function processQuestionBatch(
 
     const response = await client.messages.create({
       model: config.model || 'claude-3-sonnet-20240229',
-      max_tokens: config.maxTokens || 12000,
+      max_tokens: config.maxTokens || 8000,
       temperature: config.temperature || 0.1,
       system: systemPrompt,
       messages: [{
@@ -318,7 +318,7 @@ export async function tagQuestionsWithClaude(
 ): Promise<TaggingResult> {
   const client = initClaudeClient(config);
   const examContext = createExamContext(parsedPDFs);
-  const batchSize = config.batchSize || 5; // Process 5 questions at a time
+  const batchSize = config.batchSize || 20; // Process 5 questions at a time
   
   console.log(`\n=== Starting Claude AI Tagging ===`);
   console.log(`Exam Context: ${examContext.examFullName} (${examContext.examKey})`);

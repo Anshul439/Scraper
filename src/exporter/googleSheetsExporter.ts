@@ -3,10 +3,10 @@ import { TaggedQuestion } from '../claudePipeline/claudeTagger';
 import { readFileSync } from 'fs';
 
 export interface SheetsConfig {
-  serviceAccountKey: string | object; // Path to service account key file or key object
-  spreadsheetId: string; // Required - must provide existing spreadsheet ID
+  serviceAccountKey: string | object;
+  spreadsheetId: string;
   sheetName?: string;
-  shareWithEmails?: string[]; // Emails to share the sheet with
+  shareWithEmails?: string[];
 }
 
 export interface SheetsExportResult {
@@ -35,10 +35,8 @@ export function initSheetsClient(serviceAccountKey: string | object) {
     let credentials;
     
     if (typeof serviceAccountKey === 'string') {
-      // If it's a file path
       credentials = JSON.parse(readFileSync(serviceAccountKey, 'utf8'));
     } else {
-      // If it's already an object
       credentials = serviceAccountKey;
     }
 
@@ -85,12 +83,10 @@ export function prepareQuestionData(
     });
   }
 
-  // Limit number of questions if specified
   if (options.maxQuestionsPerSheet) {
     sortedQuestions = sortedQuestions.slice(0, options.maxQuestionsPerSheet);
   }
 
-  // Create header row
   const headers = [
     'Question ID',
     'Exam Key',
@@ -205,10 +201,8 @@ export async function exportToGoogleSheets(
     console.log(`📊 Using existing spreadsheet: ${result.spreadsheetUrl}`);
 
     if (options.groupBySubject) {
-      // Export to separate sheets by subject
       await exportBySubject(sheets, config.spreadsheetId, questions, options, result);
     } else {
-      // Export to single sheet
       await exportToSingleSheet(sheets, config.spreadsheetId, questions, config.sheetName || 'Questions', options, result);
     }
 
@@ -350,7 +344,6 @@ async function formatSheet(
     spreadsheetId,
     resource: {
       requests: [
-        // Format header row
         {
           repeatCell: {
             range: {
@@ -415,8 +408,6 @@ async function getSheetId(sheets: any, spreadsheetId: string, sheetName: string)
  * Sanitize sheet name for Google Sheets
  */
 function sanitizeSheetName(name: string): string {
-  // Google Sheets sheet names can't contain: [ ] * ? : \ / 
-  // and must be 100 chars or less
   return name
     .replace(/[\[\]*?:\\\/]/g, '-')
     .substring(0, 100)

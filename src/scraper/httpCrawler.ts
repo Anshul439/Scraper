@@ -10,7 +10,7 @@ export function filterPdfsForExam(
   pdfUrls: string[], 
   examName: string, 
   targetYears: string[],
-  examKey?: string  // NEW: optional examKey filter
+  examKey?: string
 ): string[] {
   console.log(`\nFiltering ${pdfUrls.length} PDFs for exam: ${examName}, years: ${targetYears.join(', ')}`);
   if (examKey) {
@@ -33,20 +33,15 @@ export function filterPdfsForExam(
   const filtered = pdfUrls.filter(url => {
     const urlLower = url.toLowerCase();
     
-    // Must be a PDF
     if (!PDF_EXT_REGEX.test(url)) return false;
     
-    // Must contain exam name (any pattern) OR examKey (if specified)
     let hasExamMatch = false;
     if (examKeyPatterns.length > 0) {
-      // If examKey is specified, prioritize it over examName patterns
       hasExamMatch = examKeyPatterns.some(pattern => pattern.test(urlLower));
-      // Fallback to exam name patterns if examKey doesn't match
       if (!hasExamMatch) {
         hasExamMatch = examPatterns.some(pattern => pattern.test(urlLower));
       }
     } else {
-      // Use exam name patterns only
       hasExamMatch = examPatterns.some(pattern => pattern.test(urlLower));
     }
     
@@ -56,7 +51,6 @@ export function filterPdfsForExam(
     // Must have question paper indicators
     const hasQuestionPaperKeywords = /\b(question|paper|previous|past|model|sample|set|tier|phase|shift|slot|exam|english|hindi|mathematics|reasoning|general|knowledge|gk|quantitative|aptitude|computer|awareness)\b/i.test(urlLower);
     
-    // Debug logging for first few URLs
     if (pdfUrls.indexOf(url) < 5) {
       console.log(`URL: ${url}`);
       console.log(`  Exam match: ${hasExamMatch}`);
@@ -106,7 +100,6 @@ function buildExamKeyPatterns(examKey: string): RegExp[] {
     patterns.push(new RegExp(`${escapeRegex(cleanKey)}`, 'i'));
   }
   
-  // Debug: log patterns
   console.log(`ExamKey patterns for "${examKey}":`, patterns.map(p => p.source));
   
   return patterns;
@@ -220,10 +213,7 @@ function parsePageForLinks(html: string, baseUrl: string, strategy: 'conservativ
       return;
     }
 
-    // Skip obvious non-useful links
     if (SKIP_PATTERNS.test(abs)) return;
-
-    // PDF link - always include
     if (PDF_EXT_REGEX.test(abs)) {
       pdfs.push(abs);
       return;
@@ -236,10 +226,8 @@ function parsePageForLinks(html: string, baseUrl: string, strategy: 'conservativ
     const title = ($(el).attr('title') || '').trim().toLowerCase();
     const combinedText = `${anchorText} ${title}`.trim();
 
-    // Skip based on text content
     if (SKIP_TEXT_PATTERNS.test(combinedText)) return;
 
-    // Apply strategy-based filtering
     let shouldFollow = false;
     
     if (strategy === 'maximum') {
@@ -279,13 +267,13 @@ export async function discoverAllPdfsRecursive(
   }
 ): Promise<string[]> {
   const { 
-    maxDepth = 8,  // Increased depth
-    maxPages = 2000,  // Increased page limit
-    delayMs = 200,  // Faster crawling
+    maxDepth = 8,
+    maxPages = 2000,
+    delayMs = 200,
     timeoutMs = 30000,
-    strategy = 'maximum',  // Most aggressive by default
+    strategy = 'maximum',
     verbose = true,
-    maxPdfsToFind = 1000  // Stop after finding enough PDFs
+    maxPdfsToFind = 1000
   } = opts || {};
 
   const seedHost = new URL(seedUrl).hostname;
@@ -397,7 +385,7 @@ export async function expandOneLevel(
   seedUrl: string, 
   examName: string, 
   targetYears: string[],
-  examKey?: string  // NEW: optional examKey parameter
+  examKey?: string
 ): Promise<string[]> {
   console.log(`\n=== Enhanced crawling for ${examName} ===`);
   console.log(`Target years: ${targetYears.join(', ')}`);

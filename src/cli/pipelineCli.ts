@@ -67,12 +67,12 @@ function parseCliArgs(): CliArgs {
         break;
       case "--batch-size":
       case "-b":
-        args.batchSize = parseInt(argv[i + 1]) || 5;
+        args.batchSize = parseInt(argv[i + 1]) || 20;
         i++;
         break;
       case "--max-questions":
       case "-m":
-        args.maxQuestions = parseInt(argv[i + 1]) || 100;
+        args.maxQuestions = parseInt(argv[i + 1]) || 400;
         i++;
         break;
       case "--help":
@@ -281,7 +281,7 @@ Configuration:
   Input Directory: ${args.inputDir}
   Output Directory: ${args.outputDir}
   Exam Name: ${args.examName || "Auto-detected"}
-  Batch Size: ${args.batchSize || 5}
+  Batch Size: ${args.batchSize || 20}
   Max Questions/PDF: ${args.maxQuestions || 1000}
   Claude API Key: ${apiKey.substring(0, 10)}...
   

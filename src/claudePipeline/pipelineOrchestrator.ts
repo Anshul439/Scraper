@@ -342,9 +342,9 @@ export function createPipelineConfig(
     claude: {
       apiKey: claudeApiKey,
       model: 'claude-sonnet-4-20250514',
-      maxTokens: 12000,
+      maxTokens: 8000,
       temperature: 0.1,
-      batchSize: 30
+      batchSize: 20
     },
     exam: examName ? { name: examName } : undefined,
     options: {

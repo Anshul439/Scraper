@@ -29,7 +29,6 @@ export interface Question {
   };
 }
 
-// src/types.ts - Add missing types
 export type QuestionType =
   | "MCQ"
   | "Descriptive"

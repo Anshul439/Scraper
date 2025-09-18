@@ -75,7 +75,7 @@ export function createPipelineToSheetsConfig(
   
   const sheetsConfig = createSheetsConfig(
     serviceAccountKeyPath,
-    options.spreadsheetId || '', // Ensure we have a spreadsheet ID
+    options.spreadsheetId || '',
     {
       shareWithEmails: options.shareWithEmails
     }
@@ -107,7 +107,7 @@ export async function exportMultipleExamsToSheets(
   examResults: Array<{
     examName: string;
     pipelineResult: PipelineResult;
-    outputDir: string;  // This should be the actual output directory where files are saved
+    outputDir: string;
   }>,
   config: Omit<PipelineToSheetsConfig, 'pipeline'>
 ): Promise<{
@@ -148,7 +148,6 @@ export async function exportMultipleExamsToSheets(
     
     console.log(`📂 Looking for tagged questions at: ${taggedQuestionsPath}`);
     
-    // Verify the file exists before proceeding
     if (!existsSync(taggedQuestionsPath)) {
       const errorMsg = `Tagged questions file not found at: ${taggedQuestionsPath}`;
       console.error(`❌ ${errorMsg}`);
@@ -171,16 +170,16 @@ export async function exportMultipleExamsToSheets(
     const examConfig: PipelineToSheetsConfig = {
       pipeline: {
         outputDir,
-        taggedQuestionsFile: taggedQuestionsPath  // Use the verified path
+        taggedQuestionsFile: taggedQuestionsPath
       },
       sheets: {
         ...config.sheets,
-        spreadsheetId: spreadsheetId, // Ensure spreadsheet ID is preserved
+        spreadsheetId: spreadsheetId,
         sheetName: `${examName}_Questions`
       },
       export: {
         ...config.export,
-        groupBySubject: false // Don't group by subject for multi-exam export
+        groupBySubject: false
       }
     };
 
@@ -190,7 +189,6 @@ export async function exportMultipleExamsToSheets(
       results.push({ examName, result });
       
       if (result.success) {
-        // Set the spreadsheet URL if we don't have it yet
         if (!spreadsheetUrl && result.spreadsheetUrl) {
           spreadsheetUrl = result.spreadsheetUrl;
         }
