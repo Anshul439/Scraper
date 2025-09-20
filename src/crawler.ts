@@ -119,7 +119,7 @@ function buildDynamicExamPatterns(examName: string): RegExp[] {
     
     // Pattern 3: Handle as separate words
     const parts = cleanName.split(/[-_\s]+/).filter(Boolean);
-    if (parts.length >= 2) {\\
+    if (parts.length >= 2) {
       const flexiblePattern = parts.map(escapeRegex).join('[-_\\s]*');
       patterns.push(new RegExp(`\\b${flexiblePattern}\\b`, 'i'));
       
