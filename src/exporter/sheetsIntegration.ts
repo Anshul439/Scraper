@@ -71,7 +71,6 @@ export function createPipelineToSheetsConfig(
 
   const exportOptions: ExportOptions = {
     groupBySubject: options.groupBySubject || false,
-    includeConfidenceScore: true,
     includeProcessingTimestamp: options.includeMetadata || false,
     includeProvenance: options.includeMetadata || false,
     maxQuestionsPerSheet: options.maxQuestionsPerSheet,

@@ -146,8 +146,9 @@ function buildDynamicExamPatterns(examName: string): RegExp[] {
  * Escape special regex characters
  */
 function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\  // Pattern 2: Handle different separators (dash, underscore, space');
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
+
 
 /**
  * Simple polite delay helper

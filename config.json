@@ -12,7 +12,7 @@
     {
       "examName": "IBPS-PO",
       "label": "Site for ibps-po",
-      "examKey": "ibps",
+      "examKey": "po",
       "seedUrls": [
         "https://www.careerpower.in/ibps-po-previous-year-question-paper.html"
       ],

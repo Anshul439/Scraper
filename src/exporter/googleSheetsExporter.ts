@@ -1,7 +1,11 @@
-import { google } from 'googleapis';
-import { readFileSync } from 'fs';
-import { TaggedQuestion } from '../types/questions.types';
-import { ExportOptions, SheetsConfig, SheetsExportResult } from '../types/sheets.types';
+import { google } from "googleapis";
+import { readFileSync } from "fs";
+import { TaggedQuestion } from "../types/questions.types";
+import {
+  ExportOptions,
+  SheetsConfig,
+  SheetsExportResult,
+} from "../types/sheets.types";
 
 /**
  * Initialize Google Sheets API client
@@ -9,9 +13,9 @@ import { ExportOptions, SheetsConfig, SheetsExportResult } from '../types/sheets
 export function initSheetsClient(serviceAccountKey: string | object) {
   try {
     let credentials;
-    
-    if (typeof serviceAccountKey === 'string') {
-      credentials = JSON.parse(readFileSync(serviceAccountKey, 'utf8'));
+
+    if (typeof serviceAccountKey === "string") {
+      credentials = JSON.parse(readFileSync(serviceAccountKey, "utf8"));
     } else {
       credentials = serviceAccountKey;
     }
@@ -19,14 +23,16 @@ export function initSheetsClient(serviceAccountKey: string | object) {
     const auth = new google.auth.GoogleAuth({
       credentials,
       scopes: [
-        'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/drive.file'
-      ]
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.file",
+      ],
     });
 
-    return google.sheets({ version: 'v4', auth });
+    return google.sheets({ version: "v4", auth });
   } catch (error) {
-    throw new Error(`Failed to initialize Google Sheets client: ${(error as Error).message}`);
+    throw new Error(
+      `Failed to initialize Google Sheets client: ${(error as Error).message}`
+    );
   }
 }
 
@@ -39,19 +45,20 @@ export function prepareQuestionData(
 ): any[][] {
   // Sort questions if requested
   let sortedQuestions = [...questions];
-  
+
   if (options.sortBy) {
     sortedQuestions.sort((a, b) => {
       switch (options.sortBy) {
-        case 'subject':
-          return (a.subject || '').localeCompare(b.subject || '');
-        case 'difficulty':
-          const difficultyOrder = { 'easy': 1, 'medium': 2, 'hard': 3, 'unknown': 4 };
-          return (difficultyOrder[a.difficulty as keyof typeof difficultyOrder] || 4) - 
-                 (difficultyOrder[b.difficulty as keyof typeof difficultyOrder] || 4);
-        case 'confidence':
-          return (b.confidence || 0) - (a.confidence || 0);
-        case 'pageNo':
+        case "subject":
+          return (a.subject || "").localeCompare(b.subject || "");
+        case "difficulty":
+          const difficultyOrder = { easy: 1, medium: 2, hard: 3, unknown: 4 };
+          return (
+            (difficultyOrder[a.difficulty as keyof typeof difficultyOrder] ||
+              4) -
+            (difficultyOrder[b.difficulty as keyof typeof difficultyOrder] || 4)
+          );
+        case "pageNo":
           return (a.pageNo || 0) - (b.pageNo || 0);
         default:
           return 0;
@@ -64,30 +71,24 @@ export function prepareQuestionData(
   }
 
   const headers = [
-    'Question ID',
-    'Exam Key',
-    'Year',
-    'File Name',
-    'Page No',
-    'Question Text',
-    'Question Type',
-    'Options',
-    'Subject',
-    'Topics',
-    'Difficulty',
-    'Extra Tags'
+    "Question ID",
+    "Year",
+    "File Name",
+    "Page No",
+    "Question Text",
+    "Question Type",
+    "Options",
+    "Subject",
+    "Topics",
+    "Difficulty",
   ];
 
-  if (options.includeConfidenceScore) {
-    headers.push('Confidence Score');
-  }
-
   if (options.includeProcessingTimestamp) {
-    headers.push('Processing Timestamp');
+    headers.push("Processing Timestamp");
   }
 
   if (options.includeProvenance) {
-    headers.push('Source URL', 'Char Start', 'Char End');
+    headers.push("Source URL", "Char Start", "Char End");
   }
 
   // Create data rows
@@ -95,33 +96,28 @@ export function prepareQuestionData(
 
   for (const question of sortedQuestions) {
     const row = [
-      question.id || '',
-      question.examKey || '',
-      question.year || '',
-      question.fileName || '',
-      question.pageNo?.toString() || '',
-      question.text || '',
-      question.questionType || '',
-      question.options ? question.options.join(' | ') : '',
-      question.subject || '',
-      question.topics ? question.topics.join(', ') : '',
-      question.difficulty || '',
-      question.extraTags ? question.extraTags.join(', ') : ''
+      question.id || "",
+      question.year || "",
+      question.fileName || "",
+      question.pageNo?.toString() || "",
+      question.text || "",
+      question.questionType || "",
+      question.options ? question.options.join(" | ") : "",
+      question.subject || "",
+      question.topics ? question.topics.join(", ") : "",
+      question.difficulty || "",
+      question.extraTags ? question.extraTags.join(", ") : "",
     ];
 
-    if (options.includeConfidenceScore) {
-      row.push((question.confidence || 0).toString());
-    }
-
     if (options.includeProcessingTimestamp) {
-      row.push(question.processingTimestamp || '');
+      row.push(question.processingTimestamp || "");
     }
 
     if (options.includeProvenance && question.provenance) {
       row.push(
-        question.provenance.sourceUrl || '',
-        question.provenance.charOffsetStart?.toString() || '',
-        question.provenance.charOffsetEnd?.toString() || ''
+        question.provenance.sourceUrl || "",
+        question.provenance.charOffsetStart?.toString() || "",
+        question.provenance.charOffsetEnd?.toString() || ""
       );
     }
 
@@ -134,17 +130,19 @@ export function prepareQuestionData(
 /**
  * Create sheets grouped by subject
  */
-export function groupQuestionsBySubject(questions: TaggedQuestion[]): Record<string, TaggedQuestion[]> {
+export function groupQuestionsBySubject(
+  questions: TaggedQuestion[]
+): Record<string, TaggedQuestion[]> {
   const grouped: Record<string, TaggedQuestion[]> = {};
-  
+
   for (const question of questions) {
-    const subject = question.subject || 'Unknown';
+    const subject = question.subject || "Unknown";
     if (!grouped[subject]) {
       grouped[subject] = [];
     }
     grouped[subject].push(question);
   }
-  
+
   return grouped;
 }
 
@@ -160,33 +158,45 @@ export async function exportToGoogleSheets(
     success: false,
     spreadsheetId: config.spreadsheetId,
     spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}/edit`,
-    sheetName: config.sheetName || 'Questions',
+    sheetName: config.sheetName || "Questions",
     rowsExported: 0,
-    errors: []
+    errors: [],
   };
 
   try {
-    console.log('\n🔄 Initializing Google Sheets export...');
-    
+    console.log("\n🔄 Initializing Google Sheets export...");
+
     const sheets = initSheetsClient(config.serviceAccountKey);
-    
+
     if (!config.spreadsheetId) {
-      throw new Error('Spreadsheet ID is required');
+      throw new Error("Spreadsheet ID is required");
     }
 
     console.log(`📊 Using existing spreadsheet: ${result.spreadsheetUrl}`);
 
     if (options.groupBySubject) {
-      await exportBySubject(sheets, config.spreadsheetId, questions, options, result);
+      await exportBySubject(
+        sheets,
+        config.spreadsheetId,
+        questions,
+        options,
+        result
+      );
     } else {
-      await exportToSingleSheet(sheets, config.spreadsheetId, questions, config.sheetName || 'Questions', options, result);
+      await exportToSingleSheet(
+        sheets,
+        config.spreadsheetId,
+        questions,
+        config.sheetName || "Questions",
+        options,
+        result
+      );
     }
 
     result.success = true;
     console.log(`✅ Export completed successfully!`);
     console.log(`📊 Spreadsheet URL: ${result.spreadsheetUrl}`);
     console.log(`📈 Total rows exported: ${result.rowsExported}`);
-
   } catch (error) {
     result.success = false;
     result.errors.push(`Export failed: ${(error as Error).message}`);
@@ -207,18 +217,35 @@ async function exportBySubject(
   result: SheetsExportResult
 ): Promise<void> {
   const groupedQuestions = groupQuestionsBySubject(questions);
-  
-  console.log(`📝 Exporting to ${Object.keys(groupedQuestions).length} subject sheets...`);
-  
+
+  console.log(
+    `📝 Exporting to ${Object.keys(groupedQuestions).length} subject sheets...`
+  );
+
   for (const [subject, subjectQuestions] of Object.entries(groupedQuestions)) {
     const sheetName = sanitizeSheetName(subject);
-    console.log(`  📄 Using sheet for ${subject} (${subjectQuestions.length} questions)`);
-    
+    console.log(
+      `  📄 Using sheet for ${subject} (${subjectQuestions.length} questions)`
+    );
+
     try {
-      await exportToSingleSheet(sheets, spreadsheetId, subjectQuestions, sheetName, options, result);
+      await exportToSingleSheet(
+        sheets,
+        spreadsheetId,
+        subjectQuestions,
+        sheetName,
+        options,
+        result
+      );
     } catch (error) {
-      console.error(`  ❌ Failed to export to sheet ${sheetName}: ${(error as Error).message}`);
-      result.errors.push(`Failed to export to sheet ${sheetName}: ${(error as Error).message}`);
+      console.error(
+        `  ❌ Failed to export to sheet ${sheetName}: ${
+          (error as Error).message
+        }`
+      );
+      result.errors.push(
+        `Failed to export to sheet ${sheetName}: ${(error as Error).message}`
+      );
     }
   }
 }
@@ -235,46 +262,47 @@ async function exportToSingleSheet(
   result: SheetsExportResult
 ): Promise<void> {
   const data = prepareQuestionData(questions, options);
-  
-  console.log(`  📊 Writing ${data.length - 1} questions to sheet ${sheetName}`);
-  
+
+  console.log(
+    `  📊 Writing ${data.length - 1} questions to sheet ${sheetName}`
+  );
+
   try {
     // Clear existing data and write new data
     await sheets.spreadsheets.values.clear({
       spreadsheetId,
-      range: `${sheetName}!A:Z`
+      range: `${sheetName}!A:Z`,
     });
 
     await sheets.spreadsheets.values.update({
       spreadsheetId,
       range: `${sheetName}!A1`,
-      valueInputOption: 'USER_ENTERED',
+      valueInputOption: "USER_ENTERED",
       resource: {
-        values: data
-      }
+        values: data,
+      },
     });
 
     // Format the sheet
     await formatSheet(sheets, spreadsheetId, sheetName, data[0].length);
-    
+
     result.rowsExported += data.length - 1; // Exclude header row
-    
   } catch (error) {
-    if ((error as any).message.includes('Unable to parse range')) {
+    if ((error as any).message.includes("Unable to parse range")) {
       // Sheet doesn't exist, try to create it
       console.log(`  📄 Sheet ${sheetName} doesn't exist, creating...`);
       await createSheet(sheets, spreadsheetId, sheetName);
-      
+
       // Retry the export
       await sheets.spreadsheets.values.update({
         spreadsheetId,
         range: `${sheetName}!A1`,
-        valueInputOption: 'USER_ENTERED',
+        valueInputOption: "USER_ENTERED",
         resource: {
-          values: data
-        }
+          values: data,
+        },
       });
-      
+
       await formatSheet(sheets, spreadsheetId, sheetName, data[0].length);
       result.rowsExported += data.length - 1;
     } else {
@@ -294,14 +322,16 @@ async function createSheet(
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
     resource: {
-      requests: [{
-        addSheet: {
-          properties: {
-            title: sheetName
-          }
-        }
-      }]
-    }
+      requests: [
+        {
+          addSheet: {
+            properties: {
+              title: sheetName,
+            },
+          },
+        },
+      ],
+    },
   });
 }
 
@@ -315,7 +345,7 @@ async function formatSheet(
   columnCount: number
 ): Promise<void> {
   const sheetId = await getSheetId(sheets, spreadsheetId, sheetName);
-  
+
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
     resource: {
@@ -327,16 +357,19 @@ async function formatSheet(
               startRowIndex: 0,
               endRowIndex: 1,
               startColumnIndex: 0,
-              endColumnIndex: columnCount
+              endColumnIndex: columnCount,
             },
             cell: {
               userEnteredFormat: {
                 backgroundColor: { red: 0.2, green: 0.6, blue: 1.0 },
-                textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }
-              }
+                textFormat: {
+                  bold: true,
+                  foregroundColor: { red: 1, green: 1, blue: 1 },
+                },
+              },
             },
-            fields: 'userEnteredFormat(backgroundColor,textFormat)'
-          }
+            fields: "userEnteredFormat(backgroundColor,textFormat)",
+          },
         },
         // Freeze header row
         {
@@ -344,39 +377,45 @@ async function formatSheet(
             properties: {
               sheetId,
               gridProperties: {
-                frozenRowCount: 1
-              }
+                frozenRowCount: 1,
+              },
             },
-            fields: 'gridProperties.frozenRowCount'
-          }
+            fields: "gridProperties.frozenRowCount",
+          },
         },
         // Auto-resize columns
         {
           autoResizeDimensions: {
             dimensions: {
               sheetId,
-              dimension: 'COLUMNS',
+              dimension: "COLUMNS",
               startIndex: 0,
-              endIndex: columnCount
-            }
-          }
-        }
-      ]
-    }
+              endIndex: columnCount,
+            },
+          },
+        },
+      ],
+    },
   });
 }
 
 /**
  * Get sheet ID by name
  */
-async function getSheetId(sheets: any, spreadsheetId: string, sheetName: string): Promise<number> {
+async function getSheetId(
+  sheets: any,
+  spreadsheetId: string,
+  sheetName: string
+): Promise<number> {
   const response = await sheets.spreadsheets.get({ spreadsheetId });
-  const sheet = response.data.sheets.find((s: any) => s.properties.title === sheetName);
-  
+  const sheet = response.data.sheets.find(
+    (s: any) => s.properties.title === sheetName
+  );
+
   if (!sheet) {
     throw new Error(`Sheet '${sheetName}' not found`);
   }
-  
+
   return sheet.properties.sheetId;
 }
 
@@ -385,7 +424,7 @@ async function getSheetId(sheets: any, spreadsheetId: string, sheetName: string)
  */
 function sanitizeSheetName(name: string): string {
   return name
-    .replace(/[\[\]*?:\\\/]/g, '-')
+    .replace(/[\[\]*?:\\\/]/g, "-")
     .substring(0, 100)
     .trim();
 }
@@ -401,9 +440,9 @@ export function createSheetsConfig(
   return {
     serviceAccountKey: serviceAccountKeyPath,
     spreadsheetId,
-    sheetName: 'Questions',
+    sheetName: "Questions",
     shareWithEmails: [],
-    ...options
+    ...options,
   };
 }
 
@@ -417,23 +456,29 @@ export async function exportFromPipelineOutput(
 ): Promise<SheetsExportResult> {
   try {
     console.log(`📂 Reading tagged questions from: ${taggedQuestionsFilePath}`);
-    const questionsData = JSON.parse(readFileSync(taggedQuestionsFilePath, 'utf8'));
-    
+    const questionsData = JSON.parse(
+      readFileSync(taggedQuestionsFilePath, "utf8")
+    );
+
     if (!Array.isArray(questionsData)) {
-      throw new Error('Tagged questions file should contain an array of questions');
+      throw new Error(
+        "Tagged questions file should contain an array of questions"
+      );
     }
-    
+
     console.log(`📊 Found ${questionsData.length} questions to export`);
-    
+
     return await exportToGoogleSheets(questionsData, config, options);
   } catch (error) {
     return {
       success: false,
       spreadsheetId: config.spreadsheetId,
       spreadsheetUrl: `https://docs.google.com/spreadsheets/d/${config.spreadsheetId}/edit`,
-      sheetName: config.sheetName || 'Questions',
+      sheetName: config.sheetName || "Questions",
       rowsExported: 0,
-      errors: [`Failed to export from pipeline output: ${(error as Error).message}`]
+      errors: [
+        `Failed to export from pipeline output: ${(error as Error).message}`,
+      ],
     };
   }
 }

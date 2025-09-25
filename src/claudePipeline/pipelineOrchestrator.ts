@@ -1,16 +1,14 @@
+// updatedPipelineOrchestrator.ts
 import { writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { parsePDFsInDirectoryRecursive, extractQuestionCandidates, getPDFParsingStats } from '../pdfParser';
-import { tagQuestionsWithClaude, getTaggingStats } from './claudeTagger';
 import { PipelineConfig, PipelineResult } from '../types/pipeline.types';
-import { TaggingResult } from '../types/claude.types';
-import { QuestionCandidate } from '../types/questions.types';
-import { ParsedPDF } from '../types/pdf.types';
+import { TaggedQuestion } from '../types/questions.types';
+import { processPdfsDirectly, flattenBatchResults, BatchProcessResult } from '../directPdfProcessor';
 
 /**
- * Main pipeline function - orchestrates the entire process
+ * Updated pipeline function using direct PDF processing with Claude
  */
-export async function runQuestionExtractionPipeline(config: PipelineConfig): Promise<PipelineResult> {
+export async function runDirectPdfExtractionPipeline(config: PipelineConfig): Promise<PipelineResult> {
   const startTime = Date.now();
   const result: PipelineResult = {
     success: false,
@@ -29,7 +27,7 @@ export async function runQuestionExtractionPipeline(config: PipelineConfig): Pro
 
   try {
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`🚀 Starting Question Extraction Pipeline`);
+    console.log(`🚀 Starting Direct PDF Extraction Pipeline`);
     console.log(`${'='.repeat(60)}`);
     console.log(`Input directory: ${config.inputDir}`);
     console.log(`Output directory: ${config.outputDir}`);
@@ -42,84 +40,75 @@ export async function runQuestionExtractionPipeline(config: PipelineConfig): Pro
       mkdirSync(config.outputDir, { recursive: true });
     }
 
-    // Step 1: Parse PDFs
-    console.log(`\n📄 Step 1: Parsing PDFs from ${config.inputDir}`);
-    const parsedPDFs = await parsePDFsInDirectoryRecursive(config.inputDir);
+    // Create exam context (we'll use a default context since we don't have parsed PDFs yet)
+    const examContext = {
+      examKey: config.exam?.name || 'UNKNOWN',
+      examFullName: config.exam?.name || 'Government Competitive Examination',
+      year: config.exam?.year,
+      description: 'Government competitive examination',
+      knownSubjects: ['Reasoning', 'General Knowledge', 'Quantitative Aptitude', 'English'],
+      commonTopics: [
+        'Logical Reasoning', 'Verbal Reasoning', 'Mathematical Reasoning',
+        'Current Affairs', 'General Science', 'History', 'Geography', 'Polity',
+        'Arithmetic', 'Algebra', 'Geometry', 'Statistics',
+        'Grammar', 'Vocabulary', 'Comprehension'
+      ]
+    };
+
+    // Step 1: Process PDFs directly with Claude
+    console.log(`\n📄 Step 1: Processing PDFs directly with Claude AI`);
+    const batchResult: BatchProcessResult = await processPdfsDirectly(
+      config.inputDir,
+      config.claude,
+      examContext,
+      {
+        maxFiles: config.options?.maxFiles,
+        delayBetweenFiles: config.options?.delayBetweenFiles || 3000
+      }
+    );
     
-    if (parsedPDFs.length === 0) {
-      throw new Error('No PDFs were successfully parsed');
+    if (!batchResult.success || batchResult.results.length === 0) {
+      throw new Error('No PDFs were successfully processed');
     }
 
-    result.summary.pdfsProcessed = parsedPDFs.length;
+    result.summary.pdfsProcessed = batchResult.totalFiles;
+    result.summary.questionsExtracted = batchResult.totalQuestions;
+    result.summary.questionsTagged = batchResult.totalQuestions; // Since extraction and tagging happen together
+    result.errors.push(...batchResult.errors);
+
+    // Flatten all questions from batch results
+    const allTaggedQuestions = flattenBatchResults(batchResult);
     
-    // // Save raw PDF data if requested
-    // if (config.options?.saveIntermediateResults) {
-    //   const rawDataPath = join(config.outputDir, 'raw-pdf-data.json');
-    //   writeFileSync(rawDataPath, JSON.stringify(parsedPDFs, null, 2));
-    //   result.outputs.rawPDFData = rawDataPath;
-    //   console.log(`💾 Saved raw PDF data: ${rawDataPath}`);
-    // }
-
-    // Step 2: Extract Question Candidates
-    console.log(`\n🔍 Step 2: Extracting question candidates`);
-    let allCandidates: QuestionCandidate[] = [];
-    
-    for (const pdf of parsedPDFs) {
-      console.log(`  Processing: ${pdf.fileName}`);
-      const candidates = extractQuestionCandidates(pdf);
-      
-      // Apply per-PDF limit if specified
-      const limitedCandidates = config.options?.maxQuestionsPerPDF 
-        ? candidates.slice(0, config.options.maxQuestionsPerPDF)
-        : candidates;
-      
-      allCandidates.push(...limitedCandidates);
-      console.log(`    Extracted: ${candidates.length} questions ${limitedCandidates.length !== candidates.length ? `(limited to ${limitedCandidates.length})` : ''}`);
+    if (allTaggedQuestions.length === 0) {
+      throw new Error('No questions were extracted from PDFs');
     }
 
-    if (allCandidates.length === 0) {
-      throw new Error('No question candidates were extracted from PDFs');
-    }
-
-    result.summary.questionsExtracted = allCandidates.length;
-
-    // Save extracted questions if requested
-    if (config.options?.saveIntermediateResults) {
-      const candidatesPath = join(config.outputDir, 'extracted-candidates.json');
-      writeFileSync(candidatesPath, JSON.stringify(allCandidates, null, 2));
-      result.outputs.extractedQuestions = candidatesPath;
-      console.log(`💾 Saved question candidates: ${candidatesPath}`);
-    }
-
-    // Step 3: Tag with Claude AI
-    console.log(`\n🤖 Step 3: Tagging questions with Claude AI`);
-    const taggingResult = await tagQuestionsWithClaude(parsedPDFs, allCandidates, config.claude);
-    
-    if (!taggingResult.success && taggingResult.taggedQuestions.length === 0) {
-      throw new Error('Claude AI tagging completely failed');
-    }
-
-    result.summary.questionsTagged = taggingResult.taggedQuestions.length;
-    result.errors.push(...taggingResult.errors);
-
-    // Step 4: Save Results and Generate Statistics
-    console.log(`\n💾 Step 4: Saving results and generating statistics`);
+    // Step 2: Save Results and Generate Statistics
+    console.log(`\n💾 Step 2: Saving results and generating statistics`);
     
     // Save tagged questions
     const taggedQuestionsPath = join(config.outputDir, 'tagged-questions.json');
-    writeFileSync(taggedQuestionsPath, JSON.stringify(taggingResult.taggedQuestions, null, 2));
+    writeFileSync(taggedQuestionsPath, JSON.stringify(allTaggedQuestions, null, 2));
     result.outputs.taggedQuestions = taggedQuestionsPath;
     
     // Generate and save comprehensive statistics
-    const stats = generateComprehensiveStats(parsedPDFs, allCandidates, taggingResult);
+    const stats = generateDirectPipelineStats(batchResult, allTaggedQuestions);
     const statsPath = join(config.outputDir, 'pipeline-statistics.json');
     writeFileSync(statsPath, JSON.stringify(stats, null, 2));
     result.outputs.statistics = statsPath;
     
     // Save human-readable summary
     const summaryPath = join(config.outputDir, 'summary.txt');
-    const summaryText = generateHumanReadableSummary(stats, config);
+    const summaryText = generateDirectPipelineSummary(stats, config);
     writeFileSync(summaryPath, summaryText);
+    
+    // Save detailed PDF processing results
+    if (config.options?.saveIntermediateResults) {
+      const detailedResultsPath = join(config.outputDir, 'detailed-pdf-results.json');
+      writeFileSync(detailedResultsPath, JSON.stringify(batchResult, null, 2));
+      result.outputs.detailedResults = detailedResultsPath;
+      console.log(`💾 Saved detailed results: ${detailedResultsPath}`);
+    }
     
     console.log(`✅ Saved tagged questions: ${taggedQuestionsPath}`);
     console.log(`📊 Saved statistics: ${statsPath}`);
@@ -138,13 +127,13 @@ export async function runQuestionExtractionPipeline(config: PipelineConfig): Pro
 
     // Final summary
     console.log(`\n${'='.repeat(60)}`);
-    console.log(`🎉 Pipeline Completed Successfully!`);
+    console.log(`🎉 Direct PDF Pipeline Completed Successfully!`);
     console.log(`${'='.repeat(60)}`);
     console.log(`📊 Final Summary:`);
     console.log(`   PDFs processed: ${result.summary.pdfsProcessed}`);
-    console.log(`   Questions extracted: ${result.summary.questionsExtracted}`);
-    console.log(`   Questions tagged: ${result.summary.questionsTagged}`);
-    console.log(`   Success rate: ${((result.summary.questionsTagged / result.summary.questionsExtracted) * 100).toFixed(1)}%`);
+    console.log(`   Questions extracted & tagged: ${result.summary.questionsTagged}`);
+    console.log(`   Success rate: ${((batchResult.results.filter(r => r.success).length / batchResult.totalFiles) * 100).toFixed(1)}%`);
+    console.log(`   Average questions/PDF: ${(result.summary.questionsTagged / result.summary.pdfsProcessed).toFixed(1)}`);
     console.log(`   Time elapsed: ${result.summary.timeElapsed}`);
     console.log(`   Output directory: ${config.outputDir}`);
     
@@ -171,116 +160,157 @@ export async function runQuestionExtractionPipeline(config: PipelineConfig): Pro
 }
 
 /**
- * Generate comprehensive statistics
+ * Generate comprehensive statistics for direct PDF processing
  */
-function generateComprehensiveStats(
-  parsedPDFs: ParsedPDF[],
-  candidates: QuestionCandidate[],
-  taggingResult: TaggingResult
-) {
-  const pdfStats = getPDFParsingStats(parsedPDFs);
-  const taggingStats = getTaggingStats(taggingResult.taggedQuestions);
+function generateDirectPipelineStats(batchResult: BatchProcessResult, allQuestions: TaggedQuestion[]) {
+  // PDF processing stats
+  const pdfStats = {
+    totalFiles: batchResult.totalFiles,
+    successfulFiles: batchResult.results.filter(r => r.success).length,
+    failedFiles: batchResult.results.filter(r => !r.success).length,
+    successRate: `${((batchResult.results.filter(r => r.success).length / batchResult.totalFiles) * 100).toFixed(1)}%`,
+    totalQuestions: batchResult.totalQuestions,
+    avgQuestionsPerFile: Math.round((batchResult.totalQuestions / batchResult.results.filter(r => r.success).length) * 100) / 100,
+    processingTimes: batchResult.results.map(r => ({
+      fileName: r.fileName,
+      timeMs: r.metadata.processingTime,
+      questionCount: r.questions.length
+    }))
+  };
+
+  // Question analysis stats
+  const bySubject: Record<string, number> = {};
+  const byDifficulty: Record<string, number> = {};
+  const byQuestionType: Record<string, number> = {};
+  const topicCounts: Record<string, number> = {};
+  const examKeys = new Set<string>();
+  const years = new Set<string>();
   
-  // Question extraction stats
-  const extractionStats = {
-    totalCandidates: candidates.length,
-    byType: candidates.reduce((acc, q) => {
-      acc[q.type] = (acc[q.type] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>),
-    byPage: candidates.reduce((acc, q) => {
-      acc[q.pageNumber] = (acc[q.pageNumber] || 0) + 1;
-      return acc;
-    }, {} as Record<number, number>),
-    avgQuestionsPerPDF: Math.round((candidates.length / parsedPDFs.length) * 100) / 100,
-    questionsWithOptions: candidates.filter(q => q.options && q.options.length > 0).length
+  allQuestions.forEach(q => {
+    // Count by subject
+    bySubject[q.subject || 'Unknown'] = (bySubject[q.subject || 'Unknown'] || 0) + 1;
+    
+    // Count by difficulty
+    byDifficulty[q.difficulty || 'unknown'] = (byDifficulty[q.difficulty || 'unknown'] || 0) + 1;
+    
+    // Count by question type
+    byQuestionType[q.questionType || 'Unknown'] = (byQuestionType[q.questionType || 'Unknown'] || 0) + 1;
+    
+    // Count topics
+    (q.topics || []).forEach(topic => {
+      topicCounts[topic] = (topicCounts[topic] || 0) + 1;
+    });
+    
+    
+    // Collect exam keys and years
+    if (q.examKey) examKeys.add(q.examKey);
+    if (q.year) years.add(q.year);
+  });
+  
+  // Get top topics
+  const topTopics = Object.entries(topicCounts)
+    .sort(([,a], [,b]) => b - a)
+    .slice(0, 20)
+    .map(([topic, count]) => ({ topic, count }));
+  
+
+  const questionAnalysis = {
+    totalQuestions: allQuestions.length,
+    bySubject,
+    byDifficulty,
+    byQuestionType,
+    topTopics,
+    examKeys: Array.from(examKeys),
+    years: Array.from(years),
+    questionsWithOptions: allQuestions.filter(q => q.options && q.options.length > 0).length,
+    questionsWithAnswers: allQuestions.filter(q => q.answer).length
   };
 
   return {
     generatedAt: new Date().toISOString(),
+    processingMethod: 'Direct PDF Processing with Claude AI',
     pipeline: {
-      pdfParsing: pdfStats,
-      questionExtraction: extractionStats,
-      claudeTagging: {
-        ...taggingStats,
-        processing: {
-          totalProcessed: taggingResult.stats.totalProcessed,
-          successful: taggingResult.stats.successful,
-          failed: taggingResult.stats.failed,
-          successRate: `${((taggingResult.stats.successful / taggingResult.stats.totalProcessed) * 100).toFixed(1)}%`,
-          errors: taggingResult.errors
-        }
-      }
+      pdfProcessing: pdfStats,
+      questionAnalysis: questionAnalysis,
+      errors: batchResult.errors
     }
   };
 }
 
 /**
- * Generate human-readable summary
+ * Generate human-readable summary for direct processing
  */
-function generateHumanReadableSummary(stats: any, config: PipelineConfig): string {
+function generateDirectPipelineSummary(stats: any, config: PipelineConfig): string {
   const lines = [
-    '=' .repeat(60),
-    'QUESTION EXTRACTION PIPELINE SUMMARY',
+    '='.repeat(60),
+    'DIRECT PDF EXTRACTION PIPELINE SUMMARY',
     '='.repeat(60),
     '',
     `Generated: ${new Date(stats.generatedAt).toLocaleString()}`,
+    `Processing Method: ${stats.processingMethod}`,
     `Input Directory: ${config.inputDir}`,
     `Output Directory: ${config.outputDir}`,
     '',
     'PDF PROCESSING:',
-    `  Total PDFs: ${stats.pipeline.pdfParsing.totalPDFs}`,
-    `  Total Pages: ${stats.pipeline.pdfParsing.totalPages}`,
-    `  Average Pages/PDF: ${stats.pipeline.pdfParsing.avgPagesPerPDF}`,
-    `  Total Characters: ${stats.pipeline.pdfParsing.totalCharacters.toLocaleString()}`,
-    `  Exam Keys Found: ${stats.pipeline.pdfParsing.examKeys.join(', ') || 'None'}`,
-    `  Years Found: ${stats.pipeline.pdfParsing.years.join(', ') || 'None'}`,
-    '',
-    'QUESTION EXTRACTION:',
-    `  Total Questions Extracted: ${stats.pipeline.questionExtraction.totalCandidates}`,
-    `  Average Questions/PDF: ${stats.pipeline.questionExtraction.avgQuestionsPerPDF}`,
-    `  Questions with Options: ${stats.pipeline.questionExtraction.questionsWithOptions}`,
+    `  Total PDFs: ${stats.pipeline.pdfProcessing.totalFiles}`,
+    `  Successful: ${stats.pipeline.pdfProcessing.successfulFiles}`,
+    `  Failed: ${stats.pipeline.pdfProcessing.failedFiles}`,
+    `  Success Rate: ${stats.pipeline.pdfProcessing.successRate}`,
+    `  Total Questions: ${stats.pipeline.pdfProcessing.totalQuestions}`,
+    `  Average Questions/PDF: ${stats.pipeline.pdfProcessing.avgQuestionsPerFile}`,
     ''
   ];
 
+  lines.push('QUESTION ANALYSIS:');
+  lines.push(`  Total Questions: ${stats.pipeline.questionAnalysis.totalQuestions}`);
+  lines.push(`  Questions with Options: ${stats.pipeline.questionAnalysis.questionsWithOptions}`);
+  lines.push(`  Questions with Answers: ${stats.pipeline.questionAnalysis.questionsWithAnswers}`);
+  lines.push(`  Exam Keys Found: ${stats.pipeline.questionAnalysis.examKeys.join(', ') || 'None'}`);
+  lines.push(`  Years Found: ${stats.pipeline.questionAnalysis.years.join(', ') || 'None'}`);
+  lines.push('');
+
   // Question types breakdown
   lines.push('  Question Types:');
-  Object.entries(stats.pipeline.questionExtraction.byType).forEach(([type, count]) => {
+  Object.entries(stats.pipeline.questionAnalysis.byQuestionType).forEach(([type, count]) => {
     lines.push(`    ${type}: ${count}`);
   });
   lines.push('');
 
-  lines.push('CLAUDE AI TAGGING:');
-  lines.push(`  Successfully Tagged: ${stats.pipeline.claudeTagging.processing.successful}`);
-  lines.push(`  Failed: ${stats.pipeline.claudeTagging.processing.failed}`);
-  lines.push(`  Success Rate: ${stats.pipeline.claudeTagging.processing.successRate}`);
-  lines.push(`  Average Confidence: ${stats.pipeline.claudeTagging.avgConfidence}`);
-  lines.push('');
-
   // Subjects breakdown
   lines.push('  Subjects Identified:');
-  Object.entries(stats.pipeline.claudeTagging.bySubject).forEach(([subject, count]) => {
+  Object.entries(stats.pipeline.questionAnalysis.bySubject).forEach(([subject, count]) => {
     lines.push(`    ${subject}: ${count}`);
   });
   lines.push('');
 
   // Difficulty breakdown
   lines.push('  Difficulty Distribution:');
-  Object.entries(stats.pipeline.claudeTagging.byDifficulty).forEach(([difficulty, count]) => {
+  Object.entries(stats.pipeline.questionAnalysis.byDifficulty).forEach(([difficulty, count]) => {
     lines.push(`    ${difficulty}: ${count}`);
   });
   lines.push('');
 
   // Top topics
   lines.push('  Top 10 Topics:');
-  stats.pipeline.claudeTagging.topTopics.slice(0, 10).forEach(({ topic, count }: any, index: number) => {
+  stats.pipeline.questionAnalysis.topTopics.slice(0, 10).forEach(({ topic, count }: any, index: number) => {
     lines.push(`    ${index + 1}. ${topic}: ${count}`);
   });
   lines.push('');
 
-  if (stats.pipeline.claudeTagging.processing.errors.length > 0) {
+  // Processing performance
+  lines.push('PROCESSING PERFORMANCE:');
+  const processingTimes = stats.pipeline.pdfProcessing.processingTimes;
+  if (processingTimes && processingTimes.length > 0) {
+    const avgTime = processingTimes.reduce((sum: number, p: any) => sum + p.timeMs, 0) / processingTimes.length;
+    lines.push(`  Average processing time: ${Math.round(avgTime / 1000)}s per PDF`);
+    lines.push(`  Fastest: ${Math.min(...processingTimes.map((p: any) => p.timeMs)) / 1000}s`);
+    lines.push(`  Slowest: ${Math.max(...processingTimes.map((p: any) => p.timeMs)) / 1000}s`);
+    lines.push('');
+  }
+
+  if (stats.pipeline.errors && stats.pipeline.errors.length > 0) {
     lines.push('ERRORS/WARNINGS:');
-    stats.pipeline.claudeTagging.processing.errors.forEach((error: string) => {
+    stats.pipeline.errors.forEach((error: string) => {
       lines.push(`  - ${error}`);
     });
     lines.push('');
@@ -294,9 +324,9 @@ function generateHumanReadableSummary(stats: any, config: PipelineConfig): strin
 }
 
 /**
- * Create a pipeline configuration with sensible defaults
+ * Create a pipeline configuration with sensible defaults for direct processing
  */
-export function createPipelineConfig(
+export function createDirectPipelineConfig(
   inputDir: string,
   outputDir: string,
   claudeApiKey: string,
@@ -307,23 +337,24 @@ export function createPipelineConfig(
     outputDir,
     claude: {
       apiKey: claudeApiKey,
-      model: 'claude-sonnet-4-20250514',
-      maxTokens: 8000,
+      model: 'claude-sonnet-4-20250514', // Use the latest model with PDF support
+      maxTokens: 25000,
       temperature: 0.1,
-      batchSize: 20
+      batchSize: 1 // Process one PDF at a time for direct processing
     },
     exam: examName ? { name: examName } : undefined,
     options: {
       saveIntermediateResults: true,
-      maxQuestionsPerPDF: 400
+      maxFiles: undefined, // Process all files by default
+      delayBetweenFiles: 3000 // 3 second delay between files
     }
   };
 }
 
 /**
- * Utility function to run pipeline for a specific exam directory
+ * Utility function to run direct PDF pipeline for a specific exam directory
  */
-export async function runPipelineForExam(
+export async function runDirectPipelineForExam(
   examDir: string,
   outputBaseDir: string,
   claudeApiKey: string,
@@ -332,7 +363,7 @@ export async function runPipelineForExam(
   const examDirName = examDir.split('/').pop() || 'unknown-exam';
   const outputDir = join(outputBaseDir, 'processed', examDirName);
   
-  const config = createPipelineConfig(examDir, outputDir, claudeApiKey, examName);
+  const config = createDirectPipelineConfig(examDir, outputDir, claudeApiKey, examName);
   
-  return await runQuestionExtractionPipeline(config);
+  return await runDirectPdfExtractionPipeline(config);
 }

@@ -6,9 +6,9 @@ import { readFileSync } from 'fs';
 import { argv } from "process";
 import { existsSync } from "fs";
 import {
-  runQuestionExtractionPipeline,
-  createPipelineConfig,
-  runPipelineForExam,
+  runDirectPdfExtractionPipeline,
+  createDirectPipelineConfig,
+  runDirectPipelineForExam,
 } from "../claudePipeline/pipelineOrchestrator";
 import {
   exportPipelineToSheets,
@@ -23,8 +23,7 @@ export interface CliArgs {
   outputDir?: string;
   claudeApiKey?: string;
   examName?: string;
-  batchSize?: number;
-  maxQuestions?: number;
+  maxFiles?: number;
   help?: boolean;
   dryRun?: boolean;
   exportSheets?: boolean;
@@ -35,6 +34,7 @@ export interface CliArgs {
   maxPerSheet?: number;
   spreadsheetId?: string;
   setupSheets?: boolean;
+  delayBetweenFiles?: number;
 }
 
 function parseCliArgs(): CliArgs {
@@ -64,14 +64,14 @@ function parseCliArgs(): CliArgs {
         args.examName = argv[i + 1];
         i++;
         break;
-      case "--batch-size":
-      case "-b":
-        args.batchSize = parseInt(argv[i + 1]) || 20;
+      case "--max-files":
+      case "-f":
+        args.maxFiles = parseInt(argv[i + 1]) || undefined;
         i++;
         break;
-      case "--max-questions":
-      case "-m":
-        args.maxQuestions = parseInt(argv[i + 1]) || 400;
+      case "--delay":
+      case "-d":
+        args.delayBetweenFiles = parseInt(argv[i + 1]) || 3000;
         i++;
         break;
       case "--help":
@@ -118,7 +118,7 @@ function parseCliArgs(): CliArgs {
 
 function printHelp() {
   console.log(`
-Question Extraction Pipeline CLI with Google Sheets Export
+Direct PDF Question Extraction Pipeline CLI with Google Sheets Export
 
 USAGE:
   npm run pipeline -- [OPTIONS]
@@ -128,8 +128,8 @@ BASIC OPTIONS:
   -o, --output <dir>         Output directory for results (required)
   -k, --api-key <key>        Claude AI API key (required)
   -e, --exam <name>          Exam name for context (optional)
-  -b, --batch-size <num>     Questions per batch to send to Claude (default: 5)
-  -m, --max-questions <num>  Max questions per PDF to process (default: 100)
+  -f, --max-files <num>      Maximum number of PDF files to process (optional)
+  -d, --delay <ms>           Delay between files in milliseconds (default: 3000)
       --dry-run              Show what would be processed without running
   -h, --help                 Show this help message
 
@@ -144,8 +144,12 @@ GOOGLE SHEETS EXPORT OPTIONS:
       --setup-sheets               Show Google Sheets setup instructions
 
 EXAMPLES:
-  # Basic usage
+  # Basic usage - process all PDFs directly with Claude
   npm run pipeline -- -i ./data/SSC-CHSL -o ./output -k sk-ant-...
+
+  # Process only first 5 PDFs with custom delay
+  npm run pipeline -- -i ./data/SSC-CHSL -o ./output -k sk-ant-... \\
+    --max-files 5 --delay 5000
 
   # With Google Sheets export
   npm run pipeline -- -i ./data/SSC-CHSL -o ./output -k sk-ant-... \\
@@ -174,10 +178,13 @@ ENVIRONMENT VARIABLES:
   GOOGLE_SERVICE_ACCOUNT_KEY  Alternative way to provide service account key path
 
 NOTES:
+  - This version processes PDFs directly with Claude for better quality extraction
+  - Each PDF is sent individually to Claude for comprehensive analysis
+  - Processing time will be longer but extraction quality should be significantly better
+  - Questions are extracted AND tagged in a single step
   - Google Sheets export requires a service account key
   - Spreadsheets are automatically shared with provided emails
-  - Processing time depends on number of questions and API rate limits
-  - Each question batch is sent to Claude AI for tagging before export
+  - Rate limiting is built-in with configurable delays between files
   `);
 }
 
@@ -206,12 +213,12 @@ function validateArgs(args: CliArgs): string[] {
     );
   }
 
-  if (args.batchSize && (args.batchSize < 1 || args.batchSize > 20)) {
-    errors.push("Batch size must be between 1 and 20");
+  if (args.maxFiles && args.maxFiles < 1) {
+    errors.push("Max files must be greater than 0");
   }
 
-  if (args.maxQuestions && args.maxQuestions < 1) {
-    errors.push("Max questions must be greater than 0");
+  if (args.delayBetweenFiles && args.delayBetweenFiles < 1000) {
+    errors.push("Delay between files should be at least 1000ms (1 second)");
   }
 
   // Google Sheets validation
@@ -246,7 +253,7 @@ function validateArgs(args: CliArgs): string[] {
   return errors;
 }
 
-async function runPipelineCli() {
+async function runDirectPipelineCli() {
   const args = parseCliArgs();
 
   if (args.help) {
@@ -268,8 +275,6 @@ async function runPipelineCli() {
   }
 
   const apiKey = args.claudeApiKey || process.env.CLAUDE_API_KEY!;
-  console.log(apiKey);
-
   const serviceAccountKey =
     args.serviceAccountKey || process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
 
@@ -280,9 +285,10 @@ Configuration:
   Input Directory: ${args.inputDir}
   Output Directory: ${args.outputDir}
   Exam Name: ${args.examName || "Auto-detected"}
-  Batch Size: ${args.batchSize || 20}
-  Max Questions/PDF: ${args.maxQuestions || 1000}
+  Max Files: ${args.maxFiles || "All files"}
+  Delay Between Files: ${args.delayBetweenFiles || 3000}ms
   Claude API Key: ${apiKey.substring(0, 10)}...
+  Processing Method: Direct PDF with Claude
   
 Google Sheets Export: ${args.exportSheets ? "Enabled" : "Disabled"}
 ${
@@ -302,12 +308,15 @@ ${
       const pdfFiles = readdirSync(args.inputDir!).filter((f: string) =>
         f.toLowerCase().endsWith(".pdf")
       );
-      console.log(`Found ${pdfFiles.length} PDF files to process:`);
-      pdfFiles
+      const filesToProcess = args.maxFiles ? pdfFiles.slice(0, args.maxFiles) : pdfFiles;
+      
+      console.log(`Found ${pdfFiles.length} PDF files total`);
+      console.log(`Will process ${filesToProcess.length} files:`);
+      filesToProcess
         .slice(0, 10)
         .forEach((file: string) => console.log(`  - ${file}`));
-      if (pdfFiles.length > 10) {
-        console.log(`  ... and ${pdfFiles.length - 10} more files`);
+      if (filesToProcess.length > 10) {
+        console.log(`  ... and ${filesToProcess.length - 10} more files`);
       }
     } catch (err) {
       console.error(`Error reading input directory: ${(err as Error).message}`);
@@ -318,13 +327,14 @@ ${
   }
 
   try {
-    console.log("Starting Question Extraction Pipeline...");
+    console.log("Starting Direct PDF Question Extraction Pipeline...");
     console.log(`Input: ${args.inputDir}`);
     console.log(`Output: ${args.outputDir}`);
+    console.log("Method: Direct PDF processing with Claude AI");
     if (args.examName) console.log(`Exam: ${args.examName}`);
     if (args.exportSheets) console.log("Google Sheets export: Enabled");
 
-    const config = createPipelineConfig(
+    const config = createDirectPipelineConfig(
       args.inputDir!,
       args.outputDir!,
       apiKey,
@@ -332,14 +342,13 @@ ${
     );
 
     // Override defaults with CLI args
-    if (args.batchSize) config.claude.batchSize = args.batchSize;
-    if (args.maxQuestions)
-      config.options!.maxQuestionsPerPDF = args.maxQuestions;
+    if (args.maxFiles) config.options!.maxFiles = args.maxFiles;
+    if (args.delayBetweenFiles) config.options!.delayBetweenFiles = args.delayBetweenFiles;
 
-    const result = await runQuestionExtractionPipeline(config);
+    const result = await runDirectPdfExtractionPipeline(config);
 
     if (result.success) {
-      console.log("\nPipeline completed successfully!");
+      console.log("\nDirect PDF Pipeline completed successfully!");
       console.log(`Results saved to: ${args.outputDir}`);
 
       // Show key output files
@@ -350,14 +359,15 @@ ${
       if (result.outputs.statistics) {
         console.log(`  - Statistics: ${result.outputs.statistics}`);
       }
+      if (result.outputs.detailedResults) {
+        console.log(`  - Detailed Results: ${result.outputs.detailedResults}`);
+      }
 
       console.log(`\nProcessing Summary:`);
       console.log(`  - PDFs processed: ${result.summary.pdfsProcessed}`);
-      console.log(
-        `  - Questions extracted: ${result.summary.questionsExtracted}`
-      );
-      console.log(`  - Questions tagged: ${result.summary.questionsTagged}`);
+      console.log(`  - Questions extracted & tagged: ${result.summary.questionsTagged}`);
       console.log(`  - Time elapsed: ${result.summary.timeElapsed}`);
+      console.log(`  - Average questions/PDF: ${(result.summary.questionsTagged / result.summary.pdfsProcessed).toFixed(1)}`);
 
       // Export to Google Sheets if requested
       if (args.exportSheets && serviceAccountKey) {
@@ -405,7 +415,7 @@ ${
         }
       }
     } else {
-      console.error("\nPipeline failed!");
+      console.error("\nDirect PDF Pipeline failed!");
       if (result.errors.length > 0) {
         console.error("Errors:");
         result.errors.forEach((error) => console.error(`  - ${error}`));
@@ -432,14 +442,14 @@ function loadConfig(): any {
   return null;
 }
 
-async function runForAllExams() {
+async function runDirectForAllExams() {
   const args = parseCliArgs();
   const config = loadConfig();
-  const baseDir = "./data"; // Adjust based on your structure
+  const baseDir = "./data";
   const outputBaseDir = "./processed-questions";
   const apiKey = process.env.CLAUDE_API_KEY;
   
-  // Get spreadsheet ID from CLI args, config file, or environment variable
+  // Get configuration values
   let spreadsheetId = args.spreadsheetId;
   if (!spreadsheetId && config?.googleSheets?.spreadsheetId) {
     spreadsheetId = config.googleSheets.spreadsheetId;
@@ -448,7 +458,6 @@ async function runForAllExams() {
     spreadsheetId = process.env.GOOGLE_SPREADSHEET_ID;
   }
   
-  // Get service account key from CLI args, config file, or environment variable
   let serviceAccountKey = args.serviceAccountKey;
   if (!serviceAccountKey && config?.googleSheets?.serviceAccountKeyPath) {
     serviceAccountKey = config.googleSheets.serviceAccountKeyPath;
@@ -485,7 +494,7 @@ async function runForAllExams() {
       return statSync(fullPath).isDirectory();
     });
 
-    console.log(`Found ${examDirs.length} exam directories to process:`);
+    console.log(`Found ${examDirs.length} exam directories to process with direct PDF method:`);
     examDirs.forEach((dir: string) => console.log(`  - ${dir}`));
 
     const examResults: Array<{
@@ -494,15 +503,15 @@ async function runForAllExams() {
       outputDir: string;
     }> = [];
 
-    // Process each exam
+    // Process each exam using direct PDF processing
     for (let i = 0; i < examDirs.length; i++) {
       const examDir = examDirs[i];
       console.log(`\n${"=".repeat(80)}`);
-      console.log(`Processing ${i + 1}/${examDirs.length}: ${examDir}`);
+      console.log(`Processing ${i + 1}/${examDirs.length}: ${examDir} (Direct PDF Method)`);
       console.log(`${"=".repeat(80)}`);
 
       try {
-        const result = await runPipelineForExam(
+        const result = await runDirectPipelineForExam(
           join(baseDir, examDir),
           outputBaseDir,
           apiKey,
@@ -514,12 +523,12 @@ async function runForAllExams() {
         examResults.push({
           examName: examDir,
           pipelineResult: result,
-          outputDir: actualOutputDir  // Pass the correct path where files are actually saved
+          outputDir: actualOutputDir
         });
 
         if (result.success) {
-          console.log(`✅ Successfully processed ${examDir}`);
-          console.log(`   Questions tagged: ${result.summary.questionsTagged}`);
+          console.log(`✅ Successfully processed ${examDir} with direct PDF method`);
+          console.log(`   Questions extracted & tagged: ${result.summary.questionsTagged}`);
           console.log(`   Output saved to: ${actualOutputDir}`);
         } else {
           console.error(`❌ Failed to process ${examDir}`);
@@ -533,10 +542,10 @@ async function runForAllExams() {
         );
       }
 
-      // Delay between exams to be respectful to API
+      // Longer delay between exams for direct processing
       if (i < examDirs.length - 1) {
-        console.log("⏳ Waiting 5 seconds before next exam...");
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        console.log("⏳ Waiting 10 seconds before next exam...");
+        await new Promise((resolve) => setTimeout(resolve, 10000));
       }
     }
 
@@ -548,7 +557,7 @@ async function runForAllExams() {
       console.log(`📊 Using spreadsheet ID: ${spreadsheetId}`);
 
       const sheetsConfig = createPipelineToSheetsConfig(
-        outputBaseDir, // This is less important for multi-exam export
+        outputBaseDir,
         serviceAccountKey,
         {
           spreadsheetId: spreadsheetId,
@@ -583,7 +592,7 @@ async function runForAllExams() {
       }
     }
 
-    console.log("\n🎉 All exams processed!");
+    console.log("\n🎉 All exams processed using direct PDF method!");
   } catch (error) {
     console.error(
       `Error reading exam directories: ${(error as Error).message}`
@@ -596,10 +605,10 @@ async function runForAllExams() {
 async function main() {
   // Check if --all flag is provided
   if (argv.includes("--all")) {
-    console.log("Running pipeline for all exam directories...");
-    await runForAllExams();
+    console.log("Running direct PDF pipeline for all exam directories...");
+    await runDirectForAllExams();
   } else {
-    await runPipelineCli();
+    await runDirectPipelineCli();
   }
 }
 
@@ -623,4 +632,4 @@ if (require.main === module) {
   });
 }
 
-export { runPipelineCli, runForAllExams };
+export { runDirectPipelineCli, runDirectForAllExams };
