@@ -1,4 +1,4 @@
-// directPdfProcessor.ts - Enhanced with year filtering
+// src/directPdfProcessor.ts
 import { Anthropic } from "@anthropic-ai/sdk";
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join, extname } from "path";
@@ -13,6 +13,8 @@ import { runWithConcurrency } from "./utils/concurrency";
 export interface EnhancedExamContext extends ExamContext {
   allowedYears?: string[];
   strictYearFiltering?: boolean; // If true, reject PDFs that don't match allowed years
+  // examKey may be string or string[]
+  examKey?: string | string[];
 }
 
 /**
@@ -53,9 +55,9 @@ function extractYearFromFilename(fileName: string): string | null {
   // Try different year patterns
   const yearPatterns = [
     /\b(20[0-9]{2})\b/, // Standard 4-digit year
-    /\b([0-9]{2})\b/,   // 2-digit year (will be converted to 20XX)
+    /\b([0-9]{2})\b/, // 2-digit year (will be converted to 20XX)
     /year[_-]?([0-9]{2,4})/i, // "year_2023" or similar
-    /([0-9]{4})[_-]?paper/i,  // "2023_paper" or similar
+    /([0-9]{4})[_-]?paper/i, // "2023_paper" or similar
   ];
 
   for (const pattern of yearPatterns) {
@@ -75,6 +77,23 @@ function extractYearFromFilename(fileName: string): string | null {
 }
 
 /**
+ * Normalize allowed years array to full 4-digit strings
+ */
+function normalizeYears(years?: string[]): string[] {
+  if (!years || years.length === 0) return [];
+  return years
+    .map((y) => String(y).trim())
+    .filter(Boolean)
+    .map((y) => {
+      if (/^\d{2}$/.test(y)) {
+        const n = Number(y);
+        return n <= 30 ? `20${y}` : `19${y}`;
+      }
+      return y;
+    });
+}
+
+/**
  * Check if a PDF should be processed based on year filtering rules
  */
 function shouldProcessPdf(
@@ -87,38 +106,42 @@ function shouldProcessPdf(
   }
 
   const detectedYear = extractYearFromFilename(fileName);
-  
+
   // If strict filtering is disabled and no year detected, process the file
   if (!detectedYear && !examContext.strictYearFiltering) {
-    return { 
-      shouldProcess: true, 
-      reason: "No year detected, strict filtering disabled" 
+    return {
+      shouldProcess: true,
+      reason: "No year detected, strict filtering disabled",
     };
   }
 
   // If strict filtering is enabled and no year detected, skip
   if (!detectedYear && examContext.strictYearFiltering) {
-    return { 
-      shouldProcess: false, 
-      reason: "No year detected in filename, strict filtering enabled" 
+    return {
+      shouldProcess: false,
+      reason: "No year detected in filename, strict filtering enabled",
     };
   }
 
   // Check if detected year is in allowed years
   if (detectedYear && examContext.allowedYears.includes(detectedYear)) {
-    return { 
-      shouldProcess: true, 
+    return {
+      shouldProcess: true,
       detectedYear,
-      reason: `Year ${detectedYear} is in allowed years: ${examContext.allowedYears.join(', ')}` 
+      reason: `Year ${detectedYear} is in allowed years: ${examContext.allowedYears.join(
+        ", "
+      )}`,
     };
   }
 
   // Year detected but not in allowed list
   if (detectedYear) {
-    return { 
-      shouldProcess: false, 
+    return {
+      shouldProcess: false,
       detectedYear,
-      reason: `Year ${detectedYear} not in allowed years: ${examContext.allowedYears.join(', ')}` 
+      reason: `Year ${detectedYear} not in allowed years: ${examContext.allowedYears.join(
+        ", "
+      )}`,
     };
   }
 
@@ -188,13 +211,13 @@ function extractJsonFromClaudeText(responseText: string): any | null {
 }
 
 /* --------------------------
-   Core: process a single PDF with year filtering
+   Core: process a single PDF with year & examKey filtering via LLM
    -------------------------- */
 
 export async function processPdfWithClaude(
   filePath: string,
   config: TaggingConfig,
-  examContext: EnhancedExamContext,
+  examContextInput: EnhancedExamContext,
   options: {
     pagesPerChunk?: number;
     maxRetriesPerChunk?: number;
@@ -204,6 +227,12 @@ export async function processPdfWithClaude(
 ): Promise<DirectPdfResult> {
   const startTime = Date.now();
   const fileName = filePath.split(/[/\\]/).pop() || "";
+
+  // Make a shallow copy and normalize years
+  const examContext: EnhancedExamContext = {
+    ...examContextInput,
+    allowedYears: normalizeYears(examContextInput.allowedYears),
+  };
 
   const result: DirectPdfResult = {
     success: false,
@@ -217,24 +246,25 @@ export async function processPdfWithClaude(
     errors: [],
   };
 
-  // Early year filtering check
+  // Early year filtering check using filename heuristics
   const filterCheck = shouldProcessPdf(fileName, examContext);
-  
+
   if (!filterCheck.shouldProcess) {
     result.success = false; // Mark as unsuccessful skip
     result.metadata.skippedReason = filterCheck.reason;
     result.metadata.processingTime = Date.now() - startTime;
     result.errors.push(`Skipped: ${filterCheck.reason}`);
-    
+
     console.log(`⏭️  Skipping ${fileName}: ${filterCheck.reason}`);
     return result;
   }
 
-  // Log that we're processing this file (with detected year if available)
   if (filterCheck.detectedYear) {
-    console.log(`✅ Processing ${fileName} (detected year: ${filterCheck.detectedYear})`);
+    console.log(
+      `✅ Processing ${fileName} (detected year: ${filterCheck.detectedYear})`
+    );
   } else {
-    console.log(`✅ Processing ${fileName} (no year restrictions)`);
+    console.log(`✅ Processing ${fileName} (no year restrictions detected in filename)`);
   }
 
   const pagesPerChunk = options.pagesPerChunk ?? 10;
@@ -249,8 +279,9 @@ export async function processPdfWithClaude(
     // Read PDF buffer
     const pdfBuffer = readFileSync(filePath);
 
-    // Extract exam metadata from filename heuristically
-    const yearMatch = filterCheck.detectedYear || fileName.match(/\b(20\d{2})\b/)?.[1];
+    // Extract metadata heuristically
+    const yearMatch =
+      filterCheck.detectedYear || fileName.match(/\b(20\d{2})\b/)?.[1];
     const examKeyMatch = fileName
       .toLowerCase()
       .match(
@@ -269,9 +300,9 @@ export async function processPdfWithClaude(
     const client = new Anthropic({ apiKey: config.apiKey });
     const accumulatedQuestions: TaggedQuestion[] = [];
     let globalQCounter = 0;
-    const chunkConcurrency = options.chunkConcurrency ?? 20;
+    const chunkConcurrency = options.chunkConcurrency ?? 4; // conservative default
 
-    // Create enhanced system prompt that mentions year filtering
+    // Create enhanced system prompt that mentions year filtering and examKey
     const enhancedSystemPrompt = createYearAwareSystemPrompt(examContext, filterCheck.detectedYear);
 
     // Process chunks with concurrency
@@ -285,9 +316,7 @@ export async function processPdfWithClaude(
         attempt++;
         try {
           console.log(
-            `  -> Sending chunk ${chunkIndex + 1}/${
-              chunks.length
-            } (attempt ${attempt}) pages ${chunk.fromPage}-${chunk.toPage}`
+            `  -> Sending chunk ${chunkIndex + 1}/${chunks.length} (attempt ${attempt}) pages ${chunk.fromPage}-${chunk.toPage}`
           );
 
           const userPrompt = `${createDirectPdfUserPrompt(
@@ -298,7 +327,7 @@ export async function processPdfWithClaude(
 
           const response = await client.messages.create({
             model: config.model || "claude-3-5-sonnet-20241022",
-            max_tokens: config.maxTokens || 25000,
+            max_tokens: config.maxTokens || 10000,
             temperature: config.temperature ?? 0.1,
             system: enhancedSystemPrompt,
             messages: [
@@ -331,11 +360,16 @@ export async function processPdfWithClaude(
           const parsed = extractJsonFromClaudeText(responseText);
           if (!parsed) throw new Error("No JSON found in chunk response");
 
+          // If LLM explicitly requested skipping this PDF
+          if (parsed && typeof parsed === "object" && (parsed as any).skip === true) {
+            const skipReason = (parsed as any).reason || "LLM signaled skip (no reason)";
+            return { success: true, skip: true, skipReason, questions: [] };
+          }
+
           // Parse questions from response
           let questionsArray: any[] = [];
           if (Array.isArray(parsed)) questionsArray = parsed;
-          else if (Array.isArray(parsed.questions))
-            questionsArray = parsed.questions;
+          else if (Array.isArray(parsed.questions)) questionsArray = parsed.questions;
           else if (Array.isArray(parsed.items)) questionsArray = parsed.items;
           else {
             for (const k of Object.keys(parsed)) {
@@ -345,11 +379,9 @@ export async function processPdfWithClaude(
               }
             }
           }
-          
+
           if (!Array.isArray(questionsArray))
-            throw new Error(
-              "Parsed response does not contain a questions array"
-            );
+            throw new Error("Parsed response does not contain a questions array");
 
           const converted: TaggedQuestion[] = questionsArray.map((q: any) => {
             globalQCounter++;
@@ -419,33 +451,54 @@ export async function processPdfWithClaude(
       }
     }
 
-    // Run chunks in parallel
+    // Run chunks in parallel (resilient concurrency runner returns per-item results or { error })
     const chunkResults = await runWithConcurrency(
       chunks,
       processChunk,
       chunkConcurrency
     );
 
-    // Collect results
+    // Collect results and respect LLM-level skip
+    let sawSkip = false;
+    let skipReasonFromLLM: string | undefined = undefined;
+
     for (let i = 0; i < chunkResults.length; i++) {
-      const r = chunkResults[i];
-      if (r && (r as any).success) {
-        accumulatedQuestions.push(...(r as any).questions);
-        console.log(
-          `    ✅ Chunk ${i + 1} returned ${
-            (r as any).questions.length
-          } question(s)`
-        );
+      const r = chunkResults[i] as any;
+      if (!r) {
+        const errMsg = `Chunk ${i + 1} produced no result`;
+        result.errors.push(`Chunk ${i + 1} failed: ${errMsg}`);
+        console.error(`    ✖ ${errMsg}`);
+        continue;
+      }
+
+      // LLM requested skip for document
+      if (r.skip) {
+        sawSkip = true;
+        skipReasonFromLLM = r.skipReason || "LLM signaled skip";
+        console.log(`    ⏭️  LLM requested skip on chunk ${i + 1}: ${skipReasonFromLLM}`);
+        break;
+      }
+
+      if (r.success && Array.isArray(r.questions)) {
+        accumulatedQuestions.push(...r.questions);
+        console.log(`    ✅ Chunk ${i + 1} returned ${r.questions.length} question(s)`);
       } else {
-        const errMsg =
-          r && (r as any).error ? (r as any).error : "Unknown chunk failure";
+        const errMsg = r.error || "Unknown chunk failure";
         result.errors.push(
-          `Chunk ${i + 1} (pages ${chunks[i].fromPage}-${
-            chunks[i].toPage
-          }) failed: ${errMsg}`
+          `Chunk ${i + 1} (pages ${chunks[i].fromPage}-${chunks[i].toPage}) failed: ${errMsg}`
         );
         console.error(`    ✖ Chunk ${i + 1} failed: ${errMsg}`);
       }
+    }
+
+    if (sawSkip) {
+      // Mark PDF as skipped by the LLM, set metadata and return early
+      result.success = false;
+      result.metadata.skippedReason = `Skipped by LLM: ${skipReasonFromLLM}`;
+      result.metadata.processingTime = Date.now() - startTime;
+      result.errors.push(result.metadata.skippedReason);
+      console.log(`⏭️  Skipping ${fileName} as per LLM: ${skipReasonFromLLM}`);
+      return result;
     }
 
     // Deduplicate by page + prefix of text
@@ -463,6 +516,16 @@ export async function processPdfWithClaude(
     result.metadata.totalQuestions = deduped.length;
     result.metadata.processingTime = Date.now() - startTime;
     result.success = deduped.length > 0;
+
+    // If strict year filtering is enabled and LLM found no questions, treat as skip
+    if (examContext.strictYearFiltering && result.questions.length === 0) {
+      result.success = false;
+      result.metadata.skippedReason = "LLM returned no questions and strictYearFiltering is enabled";
+      result.metadata.processingTime = Date.now() - startTime;
+      result.errors.push(result.metadata.skippedReason);
+      console.log(`⏭️  Skipping ${fileName}: ${result.metadata.skippedReason}`);
+      return result;
+    }
 
     console.log(
       `  ✅ Total extracted from ${fileName}: ${result.questions.length}`
@@ -518,24 +581,24 @@ export async function processPdfsDirectly(
       `Found ${pdfFiles.length} PDF(s). Processing up to ${filesToProcess.length} file(s).`
     );
 
-    // Show year filtering info
+    // Normalize examContext allowed years once
     if (examContext.allowedYears && examContext.allowedYears.length > 0) {
-      console.log(`📅 Year filtering enabled: ${examContext.allowedYears.join(', ')}`);
-      console.log(`🔒 Strict filtering: ${examContext.strictYearFiltering ? 'YES' : 'NO'}`);
-      
+      examContext.allowedYears = normalizeYears(examContext.allowedYears);
+      console.log(`📅 Year filtering enabled: ${examContext.allowedYears.join(", ")}`);
+      console.log(`🔒 Strict filtering: ${examContext.strictYearFiltering ? "YES" : "NO"}`);
       // Pre-check how many files will likely be processed
       const preCheckResults = filesToProcess.map(filePath => {
         const fileName = filePath.split(/[/\\]/).pop() || "";
         return shouldProcessPdf(fileName, examContext);
       });
-      
+
       const willProcess = preCheckResults.filter(r => r.shouldProcess).length;
       const willSkip = preCheckResults.filter(r => !r.shouldProcess).length;
-      
+
       console.log(`📊 Pre-check: ${willProcess} files to process, ${willSkip} files to skip`);
     }
 
-    const fileConcurrency = options.fileConcurrency ?? 20;
+    const fileConcurrency = options.fileConcurrency ?? 4;
 
     const fileResults = await runWithConcurrency(
       filesToProcess,
@@ -570,12 +633,38 @@ export async function processPdfsDirectly(
       fileConcurrency
     );
 
-    result.results.push(...fileResults);
-    
+    // fileResults items may be either DirectPdfResult or { error: string }
+    const normalizedResults: DirectPdfResult[] = fileResults.map((r: any, i: number) => {
+      if (!r) {
+        return {
+          success: false,
+          fileName: filesToProcess[i].split(/[/\\]/).pop() || "",
+          filePath: filesToProcess[i],
+          questions: [],
+          metadata: { totalQuestions: 0, processingTime: 0, skippedReason: "No result from worker" },
+          errors: ["No result from worker"]
+        };
+      }
+      if ((r as any).error && !(r as any).questions) {
+        // worker returned error placeholder
+        return {
+          success: false,
+          fileName: filesToProcess[i].split(/[/\\]/).pop() || "",
+          filePath: filesToProcess[i],
+          questions: [],
+          metadata: { totalQuestions: 0, processingTime: 0, skippedReason: (r as any).error },
+          errors: [(r as any).error]
+        };
+      }
+      return r as DirectPdfResult;
+    });
+
+    result.results.push(...normalizedResults);
+
     // Calculate statistics
-    const processedResults = fileResults.filter(r => !r.metadata.skippedReason);
-    const skippedResults = fileResults.filter(r => r.metadata.skippedReason);
-    
+    const processedResults = normalizedResults.filter(r => !r.metadata.skippedReason);
+    const skippedResults = normalizedResults.filter(r => r.metadata.skippedReason);
+
     result.totalQuestions = processedResults.reduce(
       (s, r) => s + (r.success ? r.questions.length : 0),
       0
@@ -586,6 +675,11 @@ export async function processPdfsDirectly(
     const successfulFiles = processedResults.filter((r) => r.success).length;
     result.success = successfulFiles > 0;
 
+    // aggregate errors
+    normalizedResults.forEach(r => {
+      if (r.errors && r.errors.length > 0) result.errors.push(...r.errors);
+    });
+
     console.log(`\n=== Processing Complete ===`);
     console.log(`Total files found: ${filesToProcess.length}`);
     console.log(`Files processed: ${result.totalFiles}`);
@@ -593,7 +687,7 @@ export async function processPdfsDirectly(
     console.log(`Successful: ${successfulFiles}`);
     console.log(`Failed: ${result.totalFiles - successfulFiles}`);
     console.log(`Total questions extracted: ${result.totalQuestions}`);
-    
+
     // Show skip reasons
     if (result.skippedFiles > 0) {
       console.log(`\n📋 Files skipped by year filter:`);
@@ -612,52 +706,69 @@ export async function processPdfsDirectly(
 }
 
 /* --------------------------
-   Enhanced system prompt with year awareness
+   Enhanced system prompt with year + examKey awareness
    -------------------------- */
 
 function createYearAwareSystemPrompt(
-  examContext: EnhancedExamContext, 
+  examContext: EnhancedExamContext,
   detectedYear?: string
 ): string {
-  let yearInfo = "";
-  if (examContext.allowedYears && examContext.allowedYears.length > 0) {
-    yearInfo = `\n- Target Years: ${examContext.allowedYears.join(", ")}`;
-    if (detectedYear) {
-      yearInfo += `\n- Detected Year: ${detectedYear}`;
-    }
+  // Normalize allowed years display
+  const allowedYears = examContext.allowedYears && examContext.allowedYears.length > 0
+    ? examContext.allowedYears.join(", ")
+    : "Not specified";
+
+  // Normalize examKey (could be array or string)
+  let examKeyDisplay = "Not specified";
+  if (examContext.examKey) {
+    if (Array.isArray(examContext.examKey)) examKeyDisplay = examContext.examKey.join(", ");
+    else examKeyDisplay = String(examContext.examKey);
   }
 
-  return `You are an expert in analyzing ${
-    examContext.examFullName || examContext.examKey
-  } examination PDFs. Your job is to extract all questions and provide structured JSON.
+  let yearInfo = `- Target Years: ${allowedYears}`;
+  if (detectedYear) yearInfo += `\n- Detected Year (filename heuristics): ${detectedYear}`;
+
+  return `You are an expert at analyzing examination PDFs and deciding whether a document belongs to a particular exam and year, and extracting questions from it.
 
 EXAM CONTEXT:
-- Exam: ${examContext.examFullName} (${examContext.examKey})
-- Year: ${examContext.year || "Not specified"}${yearInfo}
+- Exam (key): ${examKeyDisplay}
+- Exam full name: ${examContext.examFullName || examContext.examKey || "Not specified"}
+- Year in config: ${examContext.year || "Not specified"}
+${yearInfo}
 - Known Subjects: ${examContext.knownSubjects?.join(", ") || "Not specified"}
 
-INSTRUCTIONS:
-1. Read the provided PDF pages carefully and extract every question.
-2. For each question return: questionText, options (if any), correctAnswer (if present), pageNumber, questionType, subject, topics, difficulty, confidence (0-1).
-3. Return VALID JSON (either an array or an object with a "questions" array). Do NOT include commentary outside JSON.
+IMPORTANT FILTERING RULES (READ CAREFULLY):
+1. FIRST: Determine if the PDF content (including headings, footer, watermark, table-of-contents, first page, headers, or any metadata inside the provided pages) clearly corresponds to the target exam and one of the target years (or an academic-year pattern like 2022-2023 if targetYears contains 2022).
+2. If the document **does not** match the target examKey(s) OR **does not** match any allowed year, **DO NOT** attempt to extract questions. Instead return this exact JSON (only JSON, no commentary):
 
-RESPONSE FORMAT EXAMPLE:
 {
-  "questions": [
-    {
-      "questionNumber": 1,
-      "pageNumber": 12,
-      "questionText": "....",
-      "questionType": "MCQ",
-      "options": ["A", "B", "C", "D"],
-      "correctAnswer": "B",
-      "subject": "Quantitative Aptitude",
-      "topics": ["Percentages"],
-      "difficulty": "medium",
-      "confidence": 0.85
-    }
-  ]
+  "skip": true,
+  "reason": "<brief human-friendly reason, e.g. 'Document title indicates IBPS-PO 2018', or 'No year detected and strict filtering enabled'>"
 }
+
+3. If the document **does** match the exam and year, proceed to extract questions normally and return ONLY the JSON described below (an array of questions or an object with "questions" array).
+
+RESPONSE FORMAT WHEN EXTRACTING:
+Either return an array of question objects:
+[
+  { "questionNumber": 1, "pageNumber": 12, "questionText": "...", "questionType": "MCQ", "options": ["A","B","C","D"], "correctAnswer": "B", "subject": "...", "topics": ["..."], "difficulty":"medium", "confidence":0.8 }
+]
+
+OR return an object:
+{ "questions": [ ...same as above... ] }
+
+RESPONSE FORMAT WHEN SKIPPING:
+Return this EXACT JSON object:
+{
+  "skip": true,
+  "reason": "<brief reason>"
+}
+
+ADDITIONAL RULES:
+- Return valid JSON only. Do NOT add any extra text outside the JSON.
+- If uncertain but evidence leans toward mismatch, prefer to **skip** (i.e., be conservative).
+- If the PDF clearly includes the exam and year anywhere in examined pages, extract questions normally.
+- Page numbers in extracted questions must refer to the original global document pages.
 
 Be precise, consistent, and return only JSON.`;
 }

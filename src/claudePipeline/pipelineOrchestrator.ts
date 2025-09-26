@@ -338,7 +338,7 @@ export function createDirectPipelineConfig(
     claude: {
       apiKey: claudeApiKey,
       model: 'claude-sonnet-4-20250514', // Use the latest model with PDF support
-      maxTokens: 25000,
+      maxTokens: 10000,
       temperature: 0.1,
       batchSize: 1 // Process one PDF at a time for direct processing
     },
