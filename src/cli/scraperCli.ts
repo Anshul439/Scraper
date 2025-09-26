@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { argv } from "process";
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "fs";
+import path from "path";
 import {
   expandOneLevelUnfiltered,
   expandOneLevelMaximum,
@@ -9,9 +10,9 @@ import {
 import { downloadPdf } from "../downloader";
 import { AppConfig } from "../types/config.types";
 
-function loadConfig(path = "./config.json"): AppConfig {
-  if (!existsSync(path)) throw new Error(`Config not found at ${path}`);
-  const raw = readFileSync(path, "utf-8");
+function loadConfig(pathArg = "./config.json"): AppConfig {
+  if (!existsSync(pathArg)) throw new Error(`Config not found at ${pathArg}`);
+  const raw = readFileSync(pathArg, "utf-8");
   return JSON.parse(raw) as AppConfig;
 }
 
@@ -30,35 +31,35 @@ function parseArgFlag(flag: string) {
 }
 
 /**
- * Enhanced filter that combines year and examKey filtering
+ * Enhanced filter: basic examKey filter + year filter for manifests
+ * examKey can be string (comma-separated) or string[] in config
  */
 function filterPdfsByYearsAndExamKey(
   pdfs: string[],
   targetYears?: string[],
-  examKey?: string
+  examKey?: any
 ): string[] {
   console.log(`\nFiltering ${pdfs.length} PDFs...`);
   if (targetYears && targetYears.length > 0) {
     console.log(`  Years: ${targetYears.join(", ")}`);
   }
   if (examKey) {
-    console.log(`  Exam key: "${examKey}"`);
+    const keyDisplay =
+      Array.isArray(examKey) ? examKey.join(", ") : String(examKey);
+    console.log(`  Exam key: "${keyDisplay}"`);
   }
 
   const filtered = pdfs.filter((url) => {
-    // Must be a PDF
     if (!/\.pdf($|\?)/i.test(url)) return false;
 
     let matchesYear = true;
     let matchesExamKey = true;
 
-    // Year filter (if specified)
     if (targetYears && targetYears.length > 0) {
       matchesYear = checkYearMatch(url, targetYears);
     }
 
-    // ExamKey filter (if specified)
-    if (examKey && examKey.trim()) {
+    if (examKey) {
       matchesExamKey = checkExamKeyMatch(url, examKey);
     }
 
@@ -66,62 +67,19 @@ function filterPdfsByYearsAndExamKey(
   });
 
   console.log(`Filtered down to ${filtered.length} PDFs`);
-
-  // Detailed breakdown of filtering results
-  if (targetYears && targetYears.length > 0) {
-    const yearMatches = pdfs.filter((url) => checkYearMatch(url, targetYears));
-    console.log(
-      `  ${yearMatches.length} matched year criteria (${targetYears.join(
-        ", "
-      )})`
-    );
-  }
-  if (examKey) {
-    const examKeyMatches = pdfs.filter((url) =>
-      checkExamKeyMatch(url, examKey)
-    );
-    console.log(
-      `  ${examKeyMatches.length} matched examKey criteria ("${examKey}")`
-    );
-  }
-
-  // Show some examples of filtered PDFs
-  if (filtered.length > 0) {
-    console.log(`\nSample filtered PDFs:`);
-    filtered.slice(0, 5).forEach((url, idx) => {
-      const year = extractYearFromUrl(url);
-      const fileName = getFilenameFromUrl(url);
-      console.log(
-        `  ${idx + 1}. ${fileName} ${year ? `(${year})` : "(no year)"}`
-      );
-    });
-    if (filtered.length > 5) {
-      console.log(`  ... and ${filtered.length - 5} more`);
-    }
-  }
-
   return filtered;
 }
 
 function checkYearMatch(url: string, targetYears: string[]): boolean {
-  // Strategy 1: Direct year pattern in URL
   const directYearPattern = new RegExp(`\\b(${targetYears.join("|")})\\b`, "i");
-  if (directYearPattern.test(url)) {
-    return true;
-  }
+  if (directYearPattern.test(url)) return true;
 
-  // Strategy 2: Year in filename
   const fileName = getFilenameFromUrl(url);
-  if (directYearPattern.test(fileName)) {
-    return true;
-  }
+  if (directYearPattern.test(fileName)) return true;
 
-  // Strategy 3: Year with common separators (2023-24, 2023_24, etc.)
   for (const year of targetYears) {
     const yearNum = parseInt(year);
     if (isNaN(yearNum)) continue;
-
-    // Check for academic year patterns like 2023-24, 2023-2024
     const nextYear = yearNum + 1;
     const shortNextYear = nextYear.toString().slice(-2);
 
@@ -135,60 +93,14 @@ function checkYearMatch(url: string, targetYears: string[]): boolean {
     ];
 
     for (const pattern of academicYearPatterns) {
-      if (url.toLowerCase().includes(pattern.toLowerCase())) {
-        return true;
-      }
+      if (url.toLowerCase().includes(pattern.toLowerCase())) return true;
     }
 
-    // Check for reverse patterns (24-2023, etc.)
     const prevYear = yearNum - 1;
     const shortPrevYear = prevYear.toString().slice(-2);
-
     const reversePatterns = [`${shortPrevYear}-${year}`, `${prevYear}-${year}`];
-
     for (const pattern of reversePatterns) {
-      if (url.toLowerCase().includes(pattern.toLowerCase())) {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-function checkExamKeyMatch(url: string, examKey: string): boolean {
-  const cleanExamKey = examKey.trim().toLowerCase();
-  const urlLower = url.toLowerCase();
-
-  // Strategy 1: Direct match with word boundaries
-  const directPattern = new RegExp(`\\b${escapeRegex(cleanExamKey)}\\b`, "i");
-  if (directPattern.test(url)) {
-    return true;
-  }
-
-  // Strategy 2: Match in filename specifically
-  const fileName = getFilenameFromUrl(url);
-  if (directPattern.test(fileName)) {
-    return true;
-  }
-
-  // Strategy 3: Flexible matching with separators
-  const flexiblePattern = cleanExamKey.split("").join("[-_\\s]*");
-  if (new RegExp(`\\b${flexiblePattern}\\b`, "i").test(url)) {
-    return true;
-  }
-
-  // Strategy 4: Common prefixed versions
-  const commonPrefixes = ["ssc", "ibps", "upsc", "rrb", "bank", "railway"];
-  for (const prefix of commonPrefixes) {
-    if (!cleanExamKey.startsWith(prefix)) {
-      const prefixedPattern = new RegExp(
-        `\\b${prefix}[-_\\s]*${escapeRegex(cleanExamKey)}\\b`,
-        "i"
-      );
-      if (prefixedPattern.test(url)) {
-        return true;
-      }
+      if (url.toLowerCase().includes(pattern.toLowerCase())) return true;
     }
   }
 
@@ -196,203 +108,66 @@ function checkExamKeyMatch(url: string, examKey: string): boolean {
 }
 
 /**
- * Escape special regex characters
+ * checkExamKeyMatch: supports examKey as string (comma-separated) or string[].
+ * Enforces AND semantics: ALL tokens must appear somewhere in the URL or filename.
  */
+function checkExamKeyMatch(url: string, examKey: any): boolean {
+  if (!examKey) return true; // no filter
+
+  // Normalize to array of non-empty tokens
+  const keys: string[] = Array.isArray(examKey)
+    ? (examKey as any[]).map((k) => String(k || "").trim()).filter(Boolean)
+    : String(examKey)
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean);
+
+  if (keys.length === 0) return true;
+
+  const urlLower = url.toLowerCase();
+  const fileName = getFilenameFromUrl(url).toLowerCase();
+
+  const matchesToken = (token: string) => {
+    const t = token.toLowerCase();
+
+    // strict word-boundary try
+    try {
+      const wordBoundPattern = new RegExp(`\\b${escapeRegex(t)}\\b`, "i");
+      if (wordBoundPattern.test(urlLower) || wordBoundPattern.test(fileName))
+        return true;
+    } catch {
+      // ignore regex errors and fallback
+    }
+
+    // fallback to substring match
+    if (urlLower.includes(t) || fileName.includes(t)) return true;
+    return false;
+  };
+
+  // REQUIRE all tokens present (AND semantics)
+  return keys.every((k) => matchesToken(k));
+}
+
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-/**
- * Enhanced PDF discovery with year and examKey based filtering
- */
-async function discoverPdfs(
-  seedUrl: string,
-  examName: string,
-  outDir: string,
-  years?: string[],
-  examKey?: string,
-  mode: "normal" | "maximum" | "filtered" = "maximum"
-): Promise<{ allPdfs: string[]; filteredPdfs: string[] }> {
-  console.log(`\n  -> Discovering PDFs from: ${seedUrl}`);
-  console.log(`     Mode: ${mode}`);
-  if (years && years.length > 0)
-    console.log(`     Year filters: ${years.join(", ")}`);
-  if (examKey) console.log(`     Exam key filter: "${examKey}"`);
-
-  let allPdfs: string[] = [];
-
-  switch (mode) {
-    case "maximum":
-      allPdfs = await expandOneLevelMaximum(seedUrl);
-      break;
-    case "normal":
-      allPdfs = await expandOneLevelUnfiltered(seedUrl);
-      break;
-    case "filtered":
-      // Use filtered search with years and examKey
-      allPdfs = await expandOneLevel(
-        seedUrl,
-        examName,
-        years || ["2023", "2024", "2025"],
-        examKey
-      );
-      break;
-    default:
-      allPdfs = await expandOneLevelUnfiltered(seedUrl);
-  }
-
-  console.log(`     Total PDFs discovered: ${allPdfs.length}`);
-
-  // Apply enhanced year and examKey filtering
-  let filteredPdfs: string[] = [];
-  if ((years && years.length > 0) || examKey) {
-    filteredPdfs = filterPdfsByYearsAndExamKey(allPdfs, years, examKey);
-  } else {
-    // If no filters specified, use all PDFs
-    filteredPdfs = allPdfs;
-  }
-
-  // Enhanced logging for debugging
-  if (allPdfs.length === 0) {
-    console.log(`     ⚠️  No PDFs found. This could mean:`);
-    console.log(`        - The site structure is complex/unusual`);
-    console.log(`        - PDFs are behind forms/authentication`);
-    console.log(`        - Site uses JavaScript to load content`);
-    console.log(`        - Rate limiting is blocking requests`);
-  } else if (
-    filteredPdfs.length === 0 &&
-    ((years && years.length > 0) || examKey)
-  ) {
-    console.log(`     ⚠️  PDFs found but none match your filters:`);
-    if (years && years.length > 0) {
-      console.log(`        - Years: ${years.join(", ")}`);
-      console.log(`        - Try expanding year range or check URL patterns`);
-    }
-    if (examKey) {
-      console.log(`        - ExamKey: "${examKey}"`);
-      console.log(`        - Try different exam key variations`);
-    }
-
-    // Show sample URLs for debugging
-    console.log(`     Sample URLs found (for debugging):`);
-    allPdfs.slice(0, 3).forEach((url, idx) => {
-      const year = extractYearFromUrl(url);
-      console.log(
-        `        ${idx + 1}. ${getFilenameFromUrl(url)} ${
-          year ? `(${year})` : "(no year detected)"
-        }`
-      );
-    });
-  }
-
-  // Create output directory
-  const host = new URL(seedUrl).hostname.replace(/\./g, "-");
-  const dir = `${outDir}/${examName}`;
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-
-  // Save enhanced manifests with better year information
-  const mainManifest = {
-    seedUrl,
-    examName,
-    examKey,
-    filterYears: years,
-    crawlMode: mode,
-    crawlTimestamp: new Date().toISOString(),
-    totalPdfs: allPdfs.length,
-    totalFilteredPdfs: filteredPdfs.length,
-    filteringApplied: (years && years.length > 0) || !!examKey,
-    pdfs: allPdfs.map((url, index) => ({
-      id: index + 1,
-      url,
-      filename: getFilenameFromUrl(url),
-      yearDetected: extractYearFromUrl(url),
-      yearMatches:
-        years && years.length > 0 ? checkYearMatch(url, years) : null,
-      examKeyMatch: examKey ? checkExamKeyMatch(url, examKey) : null,
-      passesFilters: filteredPdfs.includes(url),
-    })),
-  };
-
-  const mainManifestPath = `${dir}/${host}-manifest.json`;
-  writeFileSync(
-    mainManifestPath,
-    JSON.stringify(mainManifest, null, 2),
-    "utf-8"
-  );
-  console.log(`     Saved main manifest: ${mainManifestPath}`);
-
-  // Save filtered manifest if filtering criteria are specified
-  if (((years && years.length > 0) || examKey) && filteredPdfs.length > 0) {
-    const filterSuffix = [
-      examKey ? `examkey-${examKey}` : "",
-      years && years.length > 0 ? `years-${years.join("-")}` : "",
-    ]
-      .filter(Boolean)
-      .join("-");
-
-    const filteredManifest = {
-      seedUrl,
-      examName,
-      examKey,
-      crawlMode: mode,
-      crawlTimestamp: new Date().toISOString(),
-      filterYears: years,
-      filterExamKey: examKey,
-      totalFilteredPdfs: filteredPdfs.length,
-      totalAllPdfs: allPdfs.length,
-      filteringStrategy: "enhanced-year-and-examkey",
-      pdfs: filteredPdfs.map((url, index) => ({
-        id: index + 1,
-        url,
-        filename: getFilenameFromUrl(url),
-        yearDetected: extractYearFromUrl(url),
-        examKeyMatch: examKey ? checkExamKeyMatch(url, examKey) : null,
-      })),
-    };
-
-    const filteredManifestPath = `${dir}/${host}-manifest-filtered-${filterSuffix}.json`;
-    writeFileSync(
-      filteredManifestPath,
-      JSON.stringify(filteredManifest, null, 2),
-      "utf-8"
-    );
-    console.log(`     Saved filtered manifest: ${filteredManifestPath}`);
-  }
-
-  return { allPdfs, filteredPdfs };
-}
-
-/**
- * Extract year from URL
- */
 function extractYearFromUrl(url: string): string | null {
-  // Try different year extraction strategies
-
-  // Strategy 1: Standard 4-digit year
   const standardYearMatch = url.match(/\b(20[0-2]\d)\b/);
-  if (standardYearMatch) {
-    return standardYearMatch[1];
-  }
+  if (standardYearMatch) return standardYearMatch[1];
 
-  // Strategy 2: Academic year patterns (2023-24, 2023-2024)
-  const academicYearMatch = url.match(/\b(20[0-2]\d)[-_](20[0-2]\d|\d{2})\b/);
-  if (academicYearMatch) {
-    return academicYearMatch[1]; // Return the first year
-  }
+  const academicYearMatch = url.match(
+    /\b(20[0-2]\d)[-_](20[0-2]\d|\d{2})\b/
+  );
+  if (academicYearMatch) return academicYearMatch[1];
 
-  // Strategy 3: Year in filename
   const fileName = getFilenameFromUrl(url);
   const fileYearMatch = fileName.match(/\b(20[0-2]\d)\b/);
-  if (fileYearMatch) {
-    return fileYearMatch[1];
-  }
+  if (fileYearMatch) return fileYearMatch[1];
 
   return null;
 }
 
-/**
- * Extract filename from URL
- */
 function getFilenameFromUrl(url: string): string {
   try {
     const pathname = new URL(url).pathname;
@@ -403,9 +178,6 @@ function getFilenameFromUrl(url: string): string {
   }
 }
 
-/**
- * Download PDFs with progress tracking
- */
 async function downloadPdfs(
   pdfs: string[],
   outDir: string,
@@ -462,22 +234,17 @@ async function downloadPdfs(
       });
     }
 
-    // Respectful delay between downloads
     if (i < pdfs.length - 1) {
       await new Promise((resolve) => setTimeout(resolve, 800));
     }
 
-    // Progress update every 5 downloads
     if ((i + 1) % 5 === 0) {
       console.log(
-        `    Progress: ${i + 1}/${
-          pdfs.length
-        } completed (${successful} successful, ${failed} failed)`
+        `    Progress: ${i + 1}/${pdfs.length} completed (${successful} successful, ${failed} failed)`
       );
     }
   }
 
-  // Save download results
   const downloadReport = {
     examName,
     downloadTimestamp: new Date().toISOString(),
@@ -516,30 +283,23 @@ async function main() {
   const crawlMode =
     (parseArgFlag("--mode") as "normal" | "maximum" | "filtered") || "maximum";
   const dryRun = argv.includes("--dry-run");
-  const downloadAll = argv.includes("--download-all"); // New flag to download all PDFs instead of filtered
+  const downloadAll = argv.includes("--download-all");
+  const runLLMFilter = argv.includes("--llm-filter");
 
-  // Filter exams to run
-  const examsToRun = cfg.exams.filter(
-    (e) => !cliExam || e.examName === cliExam
-  );
+  const examsToRun = cfg.exams.filter((e) => !cliExam || e.examName === cliExam);
   if (examsToRun.length === 0) {
     console.error("No exams found in config (or check --exam parameter).");
-    console.log(
-      "Available exams:",
-      cfg.exams.map((e) => e.examName).join(", ")
-    );
+    console.log("Available exams:", cfg.exams.map((e) => e.examName).join(", "));
     process.exit(1);
   }
 
-  console.log(`\n=== Enhanced PDF Scraper with ExamKey Support ===`);
+  console.log(`\n=== Enhanced PDF Scraper with ExamKey & LLM Support ===`);
   console.log(`Crawl mode: ${crawlMode.toUpperCase()}`);
   console.log(`Output directory: ${outDir}`);
   console.log(`Running exams: ${examsToRun.map((e) => e.examName).join(", ")}`);
   console.log(`Dry run: ${dryRun ? "YES (no downloads)" : "NO"}`);
   console.log(
-    `Download mode: ${
-      downloadAll ? "ALL PDFs" : "FILTERED by years/examKey only"
-    }`
+    `Download mode: ${downloadAll ? "ALL PDFs" : "FILTERED by years/examKey only (local)"}`
   );
 
   for (const exam of examsToRun) {
@@ -549,29 +309,42 @@ async function main() {
       console.log(`📅 Target years: ${exam.years.join(", ")}`);
     }
     if (exam.examKey) {
-      console.log(`🔑 Exam key filter: "${exam.examKey}"`);
+      const keyDisplay = Array.isArray(exam.examKey)
+        ? exam.examKey.join(", ")
+        : exam.examKey;
+      console.log(`🔑 Exam key filter: "${keyDisplay}"`);
     }
     console.log(`${"=".repeat(60)}`);
 
     let allDiscoveredPdfs: string[] = [];
     let allFilteredPdfs: string[] = [];
 
-    // Process each seed URL
     for (let i = 0; i < exam.seedUrls.length; i++) {
       const seed = exam.seedUrls[i];
-      console.log(
-        `\n📍 Processing seed ${i + 1}/${exam.seedUrls.length}: ${seed}`
-      );
+      console.log(`\n📍 Processing seed ${i + 1}/${exam.seedUrls.length}: ${seed}`);
 
       try {
-        const { allPdfs, filteredPdfs } = await discoverPdfs(
-          seed,
-          exam.examName,
-          outDir,
-          exam.years,
-          exam.examKey, // Pass examKey to discovery
-          crawlMode
-        );
+        const { allPdfs, filteredPdfs } = await (async () => {
+          switch (crawlMode) {
+            case "maximum":
+              return { allPdfs: await expandOneLevelMaximum(seed), filteredPdfs: [] };
+            case "normal":
+              return { allPdfs: await expandOneLevelUnfiltered(seed), filteredPdfs: [] };
+            case "filtered":
+              return {
+                allPdfs: await expandOneLevel(
+                  seed,
+                  exam.examName,
+                  exam.years ?? ["2023", "2024", "2025"],
+                  exam.examKey
+                ),
+                filteredPdfs: [],
+              };
+            default:
+              return { allPdfs: await expandOneLevelUnfiltered(seed), filteredPdfs: [] };
+          }
+        })();
+
         allDiscoveredPdfs.push(...allPdfs);
         allFilteredPdfs.push(...filteredPdfs);
 
@@ -579,97 +352,100 @@ async function main() {
           console.log(`⚠️  No PDFs found from this seed. Trying next seed...`);
         }
       } catch (error) {
-        console.error(
-          `❌ Error processing seed ${seed}:`,
-          (error as Error).message
-        );
+        console.error(`❌ Error processing seed ${seed}:`, (error as Error).message);
         console.log(`Continuing with next seed...`);
       }
     }
 
-    // Remove duplicates
     const uniqueAllPdfs = Array.from(new Set(allDiscoveredPdfs));
     const uniqueFilteredPdfs = Array.from(new Set(allFilteredPdfs));
 
     console.log(`\n📋 Discovery Summary for ${exam.examName}:`);
     console.log(`    Total unique PDFs found: ${uniqueAllPdfs.length}`);
 
-    const filterCriteria = [];
-    if (exam.years && exam.years.length > 0) {
-      filterCriteria.push(`years: ${exam.years.join(", ")}`);
-    }
+    const filterCriteria = [] as string[];
+    if (exam.years && exam.years.length > 0) filterCriteria.push(`years: ${exam.years.join(", ")}`);
     if (exam.examKey) {
-      filterCriteria.push(`examKey: "${exam.examKey}"`);
+      const k = Array.isArray(exam.examKey) ? exam.examKey.join(", ") : exam.examKey;
+      filterCriteria.push(`examKey: "${k}"`);
     }
 
     if (filterCriteria.length > 0) {
       console.log(
-        `    Filtered PDFs (${filterCriteria.join(", ")}): ${
-          uniqueFilteredPdfs.length
-        }`
+        `    Filtered PDFs (${filterCriteria.join(", ")}): ${uniqueFilteredPdfs.length}`
       );
     }
     console.log(`    From ${exam.seedUrls.length} seed URL(s)`);
 
-    if (uniqueFilteredPdfs.length > 0) {
-      console.log(`\n📄 Filtered PDFs found:`);
-      uniqueFilteredPdfs.slice(0, 10).forEach((url, idx) => {
-        const year = extractYearFromUrl(url);
-        const fileName = getFilenameFromUrl(url);
-        const examKeyMatch = exam.examKey
-          ? new RegExp(`\\b${escapeRegex(exam.examKey)}\\b`, "i").test(url)
-          : false;
-        console.log(
-          `    ${idx + 1}. ${fileName} ${year ? `(${year})` : ""} ${
-            examKeyMatch ? `[${exam.examKey}✓]` : ""
-          }`
-        );
-        if (idx < 3) console.log(`       ${url}`);
-      });
-      if (uniqueFilteredPdfs.length > 10) {
-        console.log(`    ... and ${uniqueFilteredPdfs.length - 10} more`);
-      }
-    }
+    // Apply a basic examKey filename filter if exam.examKey exists (AND semantics)
+    const basicExamKeyFiltered = exam.examKey
+      ? uniqueAllPdfs.filter((url) => {
+          const keys = Array.isArray(exam.examKey)
+            ? (exam.examKey as any[]).map(k => String(k).trim()).filter(Boolean)
+            : String(exam.examKey).split(",").map(k => k.trim()).filter(Boolean);
 
-    // Download phase
+          if (keys.length === 0) return true;
+
+          const fileName = getFilenameFromUrl(url).toLowerCase();
+          const urlLower = url.toLowerCase();
+
+          // require every key present either in filename or url (word-boundary first, fallback to includes)
+          const tokenMatches = (token: string) => {
+            try {
+              const p = new RegExp(`\\b${escapeRegex(token)}\\b`, "i");
+              if (p.test(fileName) || p.test(urlLower)) return true;
+            } catch { /* ignore */ }
+            return fileName.includes(token.toLowerCase()) || urlLower.includes(token.toLowerCase());
+          };
+
+          return keys.every(k => tokenMatches(k));
+        })
+      : uniqueAllPdfs;
+
+    // build and save unified manifest for the selected PDFs (examKey-filtered if examKey set)
+    const host = exam.seedUrls[0]
+      ? new URL(exam.seedUrls[0]).hostname.replace(/\./g, "-")
+      : exam.examName.replace(/\s+/g, "-");
+    const dir = `${outDir}/${exam.examName}`;
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+
+    const mainManifest = {
+      seedUrls: exam.seedUrls,
+      seedHost: host,
+      examName: exam.examName,
+      examKey: exam.examKey,
+      filterYears: exam.years,
+      crawlMode,
+      crawlTimestamp: new Date().toISOString(),
+      totalDiscovered: uniqueAllPdfs.length,
+      totalSelectedByExamKey: basicExamKeyFiltered.length,
+      pdfs: basicExamKeyFiltered.map((url, index) => ({
+        id: index + 1,
+        url,
+        filename: getFilenameFromUrl(url),
+        yearDetected: extractYearFromUrl(url),
+      })),
+    };
+
+    const mainManifestPath = `${dir}/${host}-manifest.json`;
+    writeFileSync(mainManifestPath, JSON.stringify(mainManifest, null, 2), "utf-8");
+    console.log(`     Saved main manifest: ${mainManifestPath}`);
+
+    // Download phase: now downloads selected PDFs if --download passed
     if (!dryRun && doDownload) {
-      if (downloadAll) {
-        // Download all discovered PDFs
-        if (uniqueAllPdfs.length > 0) {
-          await downloadPdfs(uniqueAllPdfs, outDir, exam.examName, "all");
-        }
+      // if --download-all is used, override and download everything discovered
+      const toDownload = downloadAll ? uniqueAllPdfs : basicExamKeyFiltered;
+
+      if (toDownload.length > 0) {
+        await downloadPdfs(toDownload, outDir, exam.examName, downloadAll ? "all" : "filtered");
       } else {
-        // Download only filtered PDFs (default behavior)
-        const hasFilters =
-          (exam.years && exam.years.length > 0) || exam.examKey;
-        if (hasFilters && uniqueFilteredPdfs.length > 0) {
-          await downloadPdfs(
-            uniqueFilteredPdfs,
-            outDir,
-            exam.examName,
-            "filtered"
-          );
-        } else if (!hasFilters) {
-          console.log(
-            `\n⚠️  No filters specified in config for ${exam.examName}. Skipping download.`
-          );
-          console.log(
-            `   Add "years": ["2023", "2024"] and/or "examKey": "chsl" to config or use --download-all flag.`
-          );
-        } else {
-          console.log(
-            `\n⚠️  No PDFs found matching the specified filters for ${exam.examName}.`
-          );
-        }
+        console.log("No PDFs to download after examKey filter.");
       }
     } else if (dryRun) {
       console.log(`\n🔍 Dry run complete - no downloads performed`);
-      console.log(`   Use --download flag to download filtered PDFs`);
-      console.log(`   Use --download --download-all flag to download all PDFs`);
+      console.log(`   Use --download flag to download discovered PDFs`);
     } else if (!doDownload) {
-      console.log(
-        `\n💾 Discovery complete - use --download flag to download files`
-      );
+      console.log(`\n💾 Discovery complete - use --download flag to download files`);
     }
 
     console.log(`\n✅ Completed processing exam: ${exam.examName}`);
@@ -684,42 +460,23 @@ async function main() {
   console.log("  npm run dev");
   console.log("  npm run dev -- --exam SSC-CHSL");
   console.log("");
-  console.log(
-    "  # Discover and download filtered PDFs (by years and examKey in config):"
-  );
+  console.log("  # Discover and download ALL discovered PDFs:");
   console.log("  npm run dev -- --download");
-  console.log("  npm run dev -- --exam SSC-CHSL --download");
   console.log("");
-  console.log("  # Download ALL discovered PDFs (ignore filters):");
-  console.log("  npm run dev -- --download --download-all");
+  console.log("  # Run LLM filtering (reads saved manifest and creates filtered JSON):");
+  console.log("  npm run dev -- --llm-filter");
   console.log("");
-  console.log("  # Different crawl modes:");
-  console.log(
-    "  npm run dev -- --mode maximum --download    # Most aggressive (default)"
-  );
-  console.log(
-    "  npm run dev -- --mode normal --download     # Standard crawling"
-  );
-  console.log(
-    "  npm run dev -- --mode filtered --download   # Filter during crawl"
-  );
+  console.log("  # Do both:");
+  console.log("  npm run dev -- --download --llm-filter");
   console.log("");
   console.log("  # Dry run (discover only, no downloads):");
   console.log("  npm run dev -- --dry-run");
   console.log("");
   console.log("💡 Tips:");
-  console.log(
-    '  - Add "years": ["2023", "2024", "2025"] and "examKey": "chsl" in your config.json'
-  );
-  console.log(
-    '  - examKey should be a keyword from the exam name (e.g., "chsl", "cgl", "po")'
-  );
-  console.log("  - Start with --dry-run to see what will be downloaded");
-  console.log("  - Use --download-all to ignore year and examKey filtering");
-  console.log("  - Check the manifest files for all discovered PDFs");
-  console.log(
-    "  - Filtered manifest will be created when filters are specified"
-  );
+  console.log('  - Add "years": ["2023", "2024", "2025"] and "examKey": ["ssc","chsl"] in your config.json');
+  console.log('  - examKey should be a keyword from the exam name (e.g., ["ssc","chsl"], ["ibps","po"])');
+  console.log("  - Use --dry-run to preview discovery");
+  console.log("  - Use --llm-filter to generate an LLM-based filtered manifest");
 }
 
 main().catch((err) => {
