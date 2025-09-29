@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/cli/scraperCli.ts",
-    "pipeline": "ts-node-dev --respawn --transpile-only src/cli/pipelineCli.ts",
+    "parsing": "ts-node-dev --respawn --transpile-only src/cli/parsingCli.ts",
+    "sheets-export": "ts-node-dev --respawn --transpile-only src/cli/sheetsExportCli.ts",
     "build": "tsc",
     "test": "vitest"
   },
