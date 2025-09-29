@@ -70,8 +70,11 @@ Edit `config.json` to define your target exams:
 # Discover and download PDFs
 pnpm run dev --download
 
-# Process PDFs and extract questions with AI tagging, then process with Google Sheets export
-pnpm run pipeline -- --all --export-sheets
+# 2. Parse and tag all exams
+pnpm run parsing --all
+
+# 3. Export results to Google Sheets
+pnpm run sheets-export --all
 ```
 
 ## Google Sheets Setup
@@ -140,7 +143,8 @@ Each question is enriched with AI-generated metadata:
 src/
 ├── cli/
 │   ├── scraperCli.ts          # PDF discovery and download CLI
-│   └── pipelineCli.ts         # Question processing CLI
+│   └── parsingCli.ts         # Question processing CLI
+│   └── sheetsExportCli.ts         # Question processing CLI
 ├── scraper/
 │   └── httpCrawler.ts         # Web crawling for PDF discovery
 ├── downloader/
